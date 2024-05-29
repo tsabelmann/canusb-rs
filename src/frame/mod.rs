@@ -4,7 +4,7 @@ pub mod remote;
 use std::ops::Rem;
 
 pub use remote::RemoteFrame;
-pub use data::DataFrame;
+pub use data::{DataFrame, DataFrameParseError};
 
 pub const STANDARD_MASK: u32 = 0x7FF;
 pub const EXTENDED_MASK: u32 = 0x1FFFFFFF;
