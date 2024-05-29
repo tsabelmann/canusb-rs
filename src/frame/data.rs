@@ -1,8 +1,9 @@
-use core::time;
-use std::{io::Cursor, str::FromStr};
+use std::fmt::Debug;
+use std::str::FromStr;
+
 use super::{IdentifierFormat, STANDARD_MASK, EXTENDED_MASK};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DataFrame {
     can_id: u32,
     identifier_format: IdentifierFormat,
@@ -43,6 +44,26 @@ impl DataFrame {
 
     pub fn timestamp(&self) -> u16 {
         self.timestamp
+    }
+}
+
+impl Debug for DataFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+        let mut debugstruct = f.debug_struct("DataFrame");
+        match self.identifier_format() {
+            IdentifierFormat::Standard => {
+                debugstruct.field("can_id", &format!("{:03X}", self.can_id()))
+            },
+            IdentifierFormat::Extended => {
+                debugstruct.field("can_id", &format!("{:08X}", self.can_id())) 
+            },
+        };
+        debugstruct.field("identifier_format", &self.identifier_format());
+        debugstruct.field("dlc", &self.dlc());
+        debugstruct.field("data", &format!("{:02X?}", self.data()));
+        debugstruct.field("timestamp", &self.timestamp());
+        debugstruct.finish()
     }
 }
 
@@ -201,8 +222,6 @@ impl TryFrom<&[u8]> for DataFrame {
             11 | 13 | 15 | 17 | 19 | 21 | 23 | 25 | 27 | 29 | 31 => IdentifierFormat::Extended,
             _ => return Err(DataFrameParseError::InvalidSize)
         };
-
-        println!("Len: {}", value.len());
 
         // check identifier format
         let identifier_format = match expected_format {
@@ -587,9 +606,7 @@ impl TryFrom<&[u8]> for DataFrame {
         } else {
             0
         };
-
-        println!("Timestamp: {}", timestamp);
-
+        
         // check timestamp
         if timestamp >= 60000 {
             return Err(DataFrameParseError::TimestampError);
