@@ -1,8 +1,6 @@
 pub mod data;
 pub mod remote;
 
-use std::ops::Rem;
-
 pub use remote::RemoteFrame;
 pub use data::{DataFrame, DataFrameParseError};
 
