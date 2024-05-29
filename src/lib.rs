@@ -245,7 +245,6 @@ impl LawicelBuilder {
             let bitrate_error = serial_port.read(&mut buf);
             match bitrate_error {
                 Ok(size) => {
-                    println!("{:?}", buf);
                     if size != 1usize {
                         return Err(LawicelBuilderError::LawicelConfigurationError);
                     }
@@ -254,8 +253,7 @@ impl LawicelBuilder {
                         return Err(LawicelBuilderError::LawicelConfigurationError);   
                     }
                 },
-                Err(err) => {
-                    println!("{:?}", err);
+                Err(_) => {
                     return Err(LawicelBuilderError::LawicelConfigurationError);
                 }
             }
@@ -352,28 +350,22 @@ impl Lawicel {
         };
 
         Ok(frame)
-
-        // // check re
-        // match self.serial_port.borrow_mut().read(&mut buf) {
-        //     Ok(size) => {
-        //         if size != 2usize {
-        //             return Err(LawicelReceiveError::DataLossError)
-        //         }  
-        //     },
-        //     Err(_) => {
-        //         return Err(LawicelReceiveError::DataLossError)
-        //     }
-        // };
-
-
     }
 
-    pub fn recv_remote_frame(&self) -> Result<RemoteFrame, ()> {
-        Err(())
+    pub fn recv_remote_frame(&self) -> Result<RemoteFrame, LawicelReceiveError> {
+        Err(LawicelReceiveError::DataLossError)
     }
 
-    pub fn recv(&self) -> Result<CanFrame, ()> {
-        Err(())
+    pub fn recv(&self) -> Result<CanFrame, LawicelReceiveError> {
+        match self.recv_data_frame() {
+            Ok(frame) => Ok(frame.into()),
+            Err(_) => {
+                match self.recv_remote_frame() {
+                    Ok(frame) => Ok(frame.into()),
+                    Err(err) => Err(err)
+                }
+            }
+        }
     }
 
     pub fn send_data_frame(&self, frame: &DataFrame) -> Result<(), LawicelSendError> {
@@ -412,7 +404,6 @@ impl Lawicel {
         for value in frame.data() {
             match write!(cursor, "{:02X}", value) {
                 Err(_) => {
-                    println!("I am here!");
                     return Err(LawicelSendError::FormatError)
                 },
                 _ => {}
@@ -422,15 +413,10 @@ impl Lawicel {
         // write carriage return
         match write!(cursor, "\r") {
             Err(_) => {
-                // println!("I am here!!");
-                // println!("Err: {:?}", err);
-                // println!("Curser Position: {}", cursor.position());
-                // println!("Size: {}", "\r".len());
-                // println!("DLC: {}", frame.dlc());
                 return Err(LawicelSendError::FormatError)
             },
             _ => {}
-        }
+        };
         
         // check that the computed index and the cursor index match
         if index != cursor.position() {
@@ -604,7 +590,6 @@ impl Lawicel {
             let mut buf = [0u8; 4];
             match serial_port.read(&mut buf) {
                 Ok(size) => {
-                    println!("{:?}", buf);
                     if size != 4usize {
                         return Err(());
                     }
