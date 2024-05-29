@@ -1,6 +1,6 @@
 use super::{IdentifierFormat, STANDARD_MASK, EXTENDED_MASK};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DataFrame {
     can_id: u32,
     identifier_format: IdentifierFormat,
@@ -130,7 +130,7 @@ impl DataFrameBuilder {
     }
 
     pub fn byte7(mut self, byte: u8) -> Self {
-        self.data[8] = byte;
+        self.data[7] = byte;
         self
     }
 }
