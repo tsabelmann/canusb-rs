@@ -1,6 +1,6 @@
 use super::{IdentifierFormat, STANDARD_MASK, EXTENDED_MASK};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RemoteFrame {
     can_id: u32,
     identifier_format: IdentifierFormat,
