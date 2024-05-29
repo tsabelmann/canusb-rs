@@ -9,7 +9,7 @@ pub mod frame;
 pub mod bitrate;
 pub mod status;
 
-pub use frame::{CanFrame, DataFrame, RemoteFrame, IdentifierFormat};
+pub use frame::{CanFrame, DataFrame, DataFrameParseError, RemoteFrame, IdentifierFormat};
 pub use bitrate::Bitrate;
 pub use status::Status;
 
@@ -115,6 +115,51 @@ impl LawicelBuilder {
         }
 
         // check written feedback ---> close command
+        {
+            let mut buf = [0u8; 1];
+            let open_error = serial_port.read(&mut buf);
+            match open_error {
+                Ok(size) => {
+                    if size != 1usize {
+                        return Err(LawicelBuilderError::LawicelConfigurationError);
+                    }
+                },
+                Err(_) => {
+                    return Err(LawicelBuilderError::LawicelConfigurationError);
+                }
+            }
+        }
+
+        // configure timestamp format
+        if self.use_timestamps {
+            let mut buf: [u8; 3] = [b'Z', b'1', b'\r'];
+            let open_error = serial_port.write(&mut buf);
+            match open_error {
+                Ok(size) => {
+                    if size != 3usize {
+                        return Err(LawicelBuilderError::LawicelConfigurationError);
+                    }
+                },
+                Err(_) => {
+                    return Err(LawicelBuilderError::LawicelConfigurationError);
+                },
+            }
+        } else {
+            let mut buf: [u8; 3] = [b'Z', b'0', b'\r'];
+            let open_error = serial_port.write(&mut buf);
+            match open_error {
+                Ok(size) => {
+                    if size != 3usize {
+                        return Err(LawicelBuilderError::LawicelConfigurationError);
+                    }
+                },
+                Err(_) => {
+                    return Err(LawicelBuilderError::LawicelConfigurationError);
+                },
+            }
+        }
+
+        // check written feedback ---> timestamp format command
         {
             let mut buf = [0u8; 1];
             let open_error = serial_port.read(&mut buf);
@@ -272,20 +317,63 @@ pub enum LawicelSendError {
     IncorrectResponse
 }
 
+#[derive(Debug)]
+pub enum LawicelReceiveError {
+    NoDataError,
+    SizeMismatchError,
+    ParseError,
+    DataLossError,
+    IncorrectResponse
+}
+
 impl Lawicel {
-    pub fn recv(&self) {
-        let mut buf = [0u8; 20];
-        let recv_error = self.serial_port.borrow_mut().read(&mut buf);
-
-        match recv_error {
-            Ok(size) => {
-                println!("size: {}", size);
-                println!("Buffer: {}", str::from_utf8(&buf).unwrap());
-            },
+    pub fn recv_data_frame(&self) -> Result<DataFrame, LawicelReceiveError> {
+        // read data
+        let mut buf = [0u8; 31];
+        let size = match self.serial_port.borrow_mut().read(&mut buf) {
+            Ok(size) => size,
             Err(_) => {
+                return Err(LawicelReceiveError::NoDataError)
+            }
+        };
 
-            },
-        }
+        let frame = match DataFrame::try_from(&buf[..size]) {
+            Ok(frame) => frame,
+            Err(err) => {
+                match err {
+                    DataFrameParseError::InvalidSize => {
+                        return Err(LawicelReceiveError::SizeMismatchError);
+                    },
+                    _ => {
+                        return Err(LawicelReceiveError::ParseError);
+                    }
+                }
+            }
+        };
+
+        Ok(frame)
+
+        // // check re
+        // match self.serial_port.borrow_mut().read(&mut buf) {
+        //     Ok(size) => {
+        //         if size != 2usize {
+        //             return Err(LawicelReceiveError::DataLossError)
+        //         }  
+        //     },
+        //     Err(_) => {
+        //         return Err(LawicelReceiveError::DataLossError)
+        //     }
+        // };
+
+
+    }
+
+    pub fn recv_remote_frame(&self) -> Result<RemoteFrame, ()> {
+        Err(())
+    }
+
+    pub fn recv(&self) -> Result<CanFrame, ()> {
+        Err(())
     }
 
     pub fn send_data_frame(&self, frame: &DataFrame) -> Result<(), LawicelSendError> {
