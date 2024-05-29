@@ -289,12 +289,13 @@ impl Lawicel {
     }
 
     pub fn send_data_frame(&self, frame: &DataFrame) -> Result<(), LawicelSendError> {
-        let mut buf = [0u8; 26];
+        let mut buf = [0u8; 27];
         let mut cursor = Cursor::new(&mut buf[..]);
         let mut index = 0u64;
         
         match frame.identifier_format() {
             IdentifierFormat::Standard => {
+                // compute number of ascii character
                 index = (1 + 3 + 1 + (2 * frame.dlc()) + 1).into();
                 
                 // format the beginning of the standard frame
@@ -306,6 +307,7 @@ impl Lawicel {
                 }
             },
             IdentifierFormat::Extended => {
+                // compute number of ascii character
                 index = (1 + 8 + 1 + (2 * frame.dlc()) + 1).into();
                 
                 // format the beginning of the extended frame
@@ -319,9 +321,10 @@ impl Lawicel {
         }
 
         // format data of the can frame
-        for i in 0..frame.dlc() {
-            match write!(cursor, "{:02X}", frame.data()[i as usize]) {
+        for value in frame.data() {
+            match write!(cursor, "{:02X}", value) {
                 Err(_) => {
+                    println!("I am here!");
                     return Err(LawicelSendError::FormatError)
                 },
                 _ => {}
@@ -331,6 +334,11 @@ impl Lawicel {
         // write carriage return
         match write!(cursor, "\r") {
             Err(_) => {
+                // println!("I am here!!");
+                // println!("Err: {:?}", err);
+                // println!("Curser Position: {}", cursor.position());
+                // println!("Size: {}", "\r".len());
+                // println!("DLC: {}", frame.dlc());
                 return Err(LawicelSendError::FormatError)
             },
             _ => {}
@@ -338,7 +346,6 @@ impl Lawicel {
         
         // check that the computed index and the cursor index match
         if index != cursor.position() {
-            println!("{:?}", buf);
             return Err(LawicelSendError::SizeMismatchError);
         }
 
@@ -357,7 +364,6 @@ impl Lawicel {
             }
         }
 
-
         // check written feedback ---> transmit commmand
         match serial_port.read(&mut buf) {
             Ok(size) => {
@@ -370,6 +376,7 @@ impl Lawicel {
             }
         }
 
+        // check identifier format - z for standard and Z for extended
         match frame.identifier_format() {
             IdentifierFormat::Standard => {
                 if &buf[..2] == &[b'z', b'\r'] {
@@ -389,13 +396,13 @@ impl Lawicel {
     }
 
     pub fn send_remote_frame(&self, frame: &RemoteFrame) -> Result<(), LawicelSendError> {
-        let mut buf = [0u8; 26];
+        let mut buf = [0u8; 11];
         let mut cursor = Cursor::new(&mut buf[..]);
         let mut index = 0u64;
         
         match frame.identifier_format() {
             IdentifierFormat::Standard => {
-                index = (1 + 3 + 1 + (2 * frame.dlc()) + 1).into();
+                index = 1 + 3 + 1 + 1;
                 
                 // format the beginning of the standard frame
                 match write!(cursor, "r{:03X}{:01X}", frame.can_id(), frame.dlc()) {
@@ -406,7 +413,7 @@ impl Lawicel {
                 }
             },
             IdentifierFormat::Extended => {
-                index = (1 + 8 + 1 + (2 * frame.dlc()) + 1).into();
+                index = 1 + 8 + 1 + 1;
                 
                 // format the beginning of the extended frame
                 match write!(cursor, "R{:08X}{:01X}", frame.can_id(), frame.dlc()) {
@@ -428,7 +435,6 @@ impl Lawicel {
         
         // check that the computed index and the cursor index match
         if index != cursor.position() {
-            println!("{:?}", buf);
             return Err(LawicelSendError::SizeMismatchError);
         }
 
@@ -459,6 +465,7 @@ impl Lawicel {
             }
         }
 
+        // check identifier format - z for standard and Z for extended
         match frame.identifier_format() {
             IdentifierFormat::Standard => {
                 if &buf[..2] == &[b'z', b'\r'] {
