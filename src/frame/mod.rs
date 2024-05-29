@@ -1,6 +1,8 @@
 pub mod data;
 pub mod remote;
 
+use std::ops::Rem;
+
 pub use remote::RemoteFrame;
 pub use data::DataFrame;
 
@@ -31,8 +33,22 @@ impl From<DataFrame> for CanFrame {
     }
 }
 
+impl From<&DataFrame> for CanFrame {
+    fn from(value: &DataFrame) -> Self {
+        let frame = value.clone();
+        CanFrame::DataFrame(frame)
+    }
+}
+
 impl From<RemoteFrame> for CanFrame {
     fn from(value: RemoteFrame) -> Self {
         CanFrame::RemoteFrame(value)
+    }
+}
+
+impl From<&RemoteFrame> for CanFrame {
+    fn from(value: &RemoteFrame) -> Self {
+        let frame = value.clone();
+        CanFrame::RemoteFrame(frame)
     }
 }
