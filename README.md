@@ -1,8 +1,12 @@
 # canusb-rs
 
-LAWICEL CANUSB and LAWICEL CAN232 serial API written in Rust. This project was created during my working hours at the [NAEXT GmbH](https://naext.de).
+*LAWICEL CANUSB and LAWICEL CAN232 serial API written in Rust.*
+
+This project was created mostly during my working hours at [NAEXT GmbH](https://naext.de) and kindly supported by the people at [ELMICRO Computer GmbH & Co. KG](https://elmicro.com/).
 
 ## Installation
+
+
 
 ## Usage
 
@@ -23,7 +27,7 @@ the [issue tracker](https://github.com/tsabelmann/lawicel-rs/issues) to contact 
 
 ## Disclaimer
 
-LAWICEL CANUSB and LAWICEL CAN232 are trademarks of ELMICRO Computer GmbH & Co. KG, used here with the permission of the owner. The official CANUSB project page can be found at https://www.canusb.com
+LAWICEL CANUSB and LAWICEL CAN232 are trademarks of [ELMICRO Computer GmbH & Co. KG](https://elmicro.com/), used here with the permission of the owner. The official CANUSB project page can be found at https://www.canusb.com.
 
 ## Contributors
 -  [Tim Lucas Sabelmann](https://github.com/tsabelmann)
