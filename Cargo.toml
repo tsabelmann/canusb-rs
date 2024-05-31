@@ -1,13 +1,13 @@
 [package]
 
-name = "lawicel"
+name = "canusb"
 license = "MIT/Apache-2.0"
 authors = ["Tim Lucas Sabelmann <tsabelmann>"]
 categories = ["api-bindings"]
-description = "Ergonomic Rust-API to interact with LAWICEL-CANUSB serial interfaces"
-homepage = "https://github.com/tsabelmann/lawicel-rs"
+description = "Ergonomic Rust-API to interact with LAWICEL CANUSB and LAWICEL CAN232 serial interfaces"
+homepage = "https://github.com/tsabelmann/canusb-rs"
 keywords = ["lawicel", "can", "interface"]
-repository = "https://github.com/tsabelmann/lawicel-rs"
+repository = "https://github.com/tsabelmann/canusb-rs"
 readme = "README.md"
 version = "0.1.0"
 edition = "2021"
