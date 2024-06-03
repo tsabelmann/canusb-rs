@@ -16,7 +16,8 @@ pub struct LawicelCanUsbBuilder {
     bitrate: Bitrate,
     acceptance_code_register: u32,
     acceptance_mask_register: u32,
-    use_timestamps: bool
+    use_timestamps: bool,
+    retry_counter: u32
 }
 
 #[derive(Debug)]
@@ -32,7 +33,8 @@ pub fn new<'a>(path: impl Into<std::borrow::Cow<'a, str>>, bitrate: Bitrate) -> 
         acceptance_code_register: 0x00000000u32,
         acceptance_mask_register: 0xFFFFFFFFu32,
         bitrate: bitrate,
-        use_timestamps: false
+        use_timestamps: false,
+        retry_counter: 0
     }
 }
 
@@ -64,6 +66,11 @@ impl LawicelCanUsbBuilder {
 
     pub fn use_timestamps(mut self, value: bool) -> Self {
         self.use_timestamps = value;
+        self
+    }
+
+    pub fn retry_counter(mut self, value: u32) -> Self {
+        self.retry_counter = value;
         self
     }
 
