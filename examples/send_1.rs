@@ -1,8 +1,8 @@
-use lawicel::frame::{DataFrame, IdentifierFormat};
-use lawicel::bitrate::Bitrate;
+use canusb::frame::{DataFrame, IdentifierFormat};
+use canusb::bitrate::Bitrate;
 
 fn main() {
-    let port = lawicel::new("/dev/ttyUSB0", Bitrate::Bitrate500K)
+    let port = canusb::canusb::new("/dev/ttyUSB0", Bitrate::Bitrate500K)
         .open()
         .expect("Could not open /dev/ttyUSB0 with 500K bitrate");
 
@@ -19,9 +19,12 @@ fn main() {
             .dlc(8)
             .into();
 
-        match port.send(&frame) {
-            Ok(_) => println!("Send frame to the wire!"),
-            Err(_) => println!("Sending the frame to the wire failed...")
-        };
+
+        for _ in 0..10 {
+            match port.send(&frame) {
+                Ok(_) => println!("Send frame to the wire!"),
+                Err(_) => println!("Sending the frame to the wire failed...")
+            };
+        }
     }
 }
