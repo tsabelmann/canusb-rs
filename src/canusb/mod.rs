@@ -17,7 +17,7 @@ pub struct LawicelCanUsbBuilder {
     acceptance_code_register: u32,
     acceptance_mask_register: u32,
     use_timestamps: bool,
-    retry_counter: u32
+    retries: u32
 }
 
 #[derive(Debug)]
@@ -34,7 +34,7 @@ pub fn new<'a>(path: impl Into<std::borrow::Cow<'a, str>>, bitrate: Bitrate) -> 
         acceptance_mask_register: 0xFFFFFFFFu32,
         bitrate: bitrate,
         use_timestamps: false,
-        retry_counter: 0
+        retries: 0
     }
 }
 
@@ -69,8 +69,8 @@ impl LawicelCanUsbBuilder {
         self
     }
 
-    pub fn retry_counter(mut self, value: u32) -> Self {
-        self.retry_counter = value;
+    pub fn retries(mut self, value: u32) -> Self {
+        self.retries = value;
         self
     }
 
@@ -80,24 +80,24 @@ impl LawicelCanUsbBuilder {
             .stop_bits(serialport::StopBits::One)
             .parity(serialport::Parity::None)
             .flow_control(serialport::FlowControl::None)
-            .timeout(Duration::from_millis(100))
+            .timeout(Duration::from_micros(2500))
             .open();
 
         // unmarshalling of the serialport
         let mut serial_port = match serial_port {
-            Err(_) => {
-                return Err(LawicelCanUsbBuilderError::SerialPortOpenError);
-            },
             Ok(serial_port) => {
                 serial_port
+            },
+            Err(_) => {
+                return Err(LawicelCanUsbBuilderError::SerialPortOpenError);
             }
         };
 
         // close Lawicel if not closed correctly
         {
+            let _ = serial_port.clear(serialport::ClearBuffer::All);
             let mut buf: [u8; 2] = [b'C', b'\r'];
-            let open_error = serial_port.write(&mut buf);
-            match open_error {
+            match serial_port.write(&mut buf) {
                 Ok(size) => {
                     if size != 2usize {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -107,13 +107,13 @@ impl LawicelCanUsbBuilder {
                     return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
                 },
             }
+            let _ = serial_port.clear(serialport::ClearBuffer::Input);
         }
 
         // check written feedback ---> close command
         {
             let mut buf = [0u8; 1];
-            let open_error = serial_port.read(&mut buf);
-            match open_error {
+            match serial_port.read(&mut buf) {
                 Ok(size) => {
                     if size != 1usize {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -128,8 +128,7 @@ impl LawicelCanUsbBuilder {
         // configure timestamp format
         if self.use_timestamps {
             let mut buf: [u8; 3] = [b'Z', b'1', b'\r'];
-            let open_error = serial_port.write(&mut buf);
-            match open_error {
+            match serial_port.write(&mut buf) {
                 Ok(size) => {
                     if size != 3usize {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -141,8 +140,7 @@ impl LawicelCanUsbBuilder {
             }
         } else {
             let mut buf: [u8; 3] = [b'Z', b'0', b'\r'];
-            let open_error = serial_port.write(&mut buf);
-            match open_error {
+            match serial_port.write(&mut buf) {
                 Ok(size) => {
                     if size != 3usize {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -157,8 +155,7 @@ impl LawicelCanUsbBuilder {
         // check written feedback ---> timestamp format command
         {
             let mut buf = [0u8; 1];
-            let open_error = serial_port.read(&mut buf);
-            match open_error {
+            match serial_port.read(&mut buf) {
                 Ok(size) => {
                     if size != 1usize {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -237,8 +234,7 @@ impl LawicelCanUsbBuilder {
         // check bitrate feedback ---> bitrate command
         {
             let mut buf = [0u8; 1];
-            let bitrate_error = serial_port.read(&mut buf);
-            match bitrate_error {
+            match serial_port.read(&mut buf) {
                 Ok(size) => {
                     if size != 1usize {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -257,8 +253,7 @@ impl LawicelCanUsbBuilder {
         // open Lawicel 
         {
             let mut buf: [u8; 2] = [b'O', b'\r'];
-            let open_error = serial_port.write(&mut buf);
-            match open_error {
+            match serial_port.write(&mut buf) {
                 Ok(size) => {
                     if size != 2usize {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -273,8 +268,7 @@ impl LawicelCanUsbBuilder {
         // check written feedback ---> open command
         {
             let mut buf = [0u8; 1];
-            let open_error = serial_port.read(&mut buf);
-            match open_error {
+            match serial_port.read(&mut buf) {
                 Ok(size) => {
                     if (size != 1usize) && (buf[0] != b'\r') {
                         return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
@@ -291,8 +285,6 @@ impl LawicelCanUsbBuilder {
         };
         Ok(lawicel)
     }
-
-
 }
 
 
@@ -320,9 +312,12 @@ pub enum LawicelCanUsbReceiveError {
 impl LawicelCanUsb {
     pub fn recv_data_frame(&self) -> Result<DataFrame, LawicelCanUsbReceiveError> {
         // read data
-        let mut buf = [0u8; 31];
-        let size = match self.serial_port.borrow_mut().read(&mut buf) {
-            Ok(size) => size,
+        let mut buf = [b'\0'; 31];
+        let mut port = self.serial_port.borrow_mut();
+        let size = match port.read(&mut buf) {
+            Ok(size) => {
+                size
+            },
             Err(_) => {
                 return Err(LawicelCanUsbReceiveError::NoDataError)
             }
@@ -366,6 +361,8 @@ impl LawicelCanUsb {
         let mut cursor = Cursor::new(&mut buf[..]);
         let mut index = 0u64;
         
+        println!("T1");
+
         match frame.identifier_format() {
             IdentifierFormat::Standard => {
                 // compute number of ascii character
@@ -393,6 +390,8 @@ impl LawicelCanUsb {
             },
         }
 
+        println!("T2");
+
         // format data of the can frame
         for value in frame.data() {
             match write!(cursor, "{:02X}", value) {
@@ -403,6 +402,8 @@ impl LawicelCanUsb {
             }
         }
 
+        println!("T3");
+
         // write carriage return
         match write!(cursor, "\r") {
             Err(_) => {
@@ -410,14 +411,20 @@ impl LawicelCanUsb {
             },
             _ => {}
         };
+
+        println!("T4");
         
         // check that the computed index and the cursor index match
         if index != cursor.position() {
             return Err(LawicelCanUsbSendError::SizeMismatchError);
         }
 
+        println!("T5");
+
         let len = index as usize;
         let mut serial_port = self.serial_port.borrow_mut();
+
+        println!("T6");
 
         // check written bytes to the number of computed bytes
         match serial_port.write(&mut buf[..len]) {
@@ -431,17 +438,31 @@ impl LawicelCanUsb {
             }
         }
 
+        println!("T7");
+
         // check written feedback ---> transmit commmand
-        match serial_port.read(&mut buf) {
-            Ok(size) => {
-                if size != 2usize {
-                    return Err(LawicelCanUsbSendError::DataLossError);
-                }  
-            },
-            Err(_) => {
+        // match serial_port.read(&mut buf) {
+        //     Ok(size) => {
+        //         println!("{:?}", &buf[..size]);
+        //         if size < 2usize {
+        //             return Err(LawicelCanUsbSendError::DataLossError);
+        //         }  
+        //     },
+        //     Err(err) => {
+        //         println!("{:?}", err);
+        //         return Err(LawicelCanUsbSendError::DataLossError);
+        //     }
+        // }
+
+        match serial_port.read_exact(&mut buf[..2]) {
+            Ok(_) => {},
+            Err(err) => {
+                println!("{:?}", err);
                 return Err(LawicelCanUsbSendError::DataLossError);
             }
         }
+
+        println!("T8");
 
         // check identifier format - z for standard and Z for extended
         match frame.identifier_format() {
@@ -606,38 +627,18 @@ impl LawicelCanUsb {
     }
 
     fn close(&self) {
-        // close Lawicel
         let mut serial_port = self.serial_port.borrow_mut();
 
+        // write close command
         {
             let mut buf: [u8; 2] = [b'C', b'\r'];
-            let close_error = serial_port.write(&mut buf);
-            // match open_error {
-            //     Ok(size) => {
-            //         if size != 2usize {
-            //             return Err(LawicelBuilderError::LawicelConfigurationError);
-            //         }
-            //     },
-            //     Err(_) => {
-            //         return Err(LawicelBuilderError::LawicelConfigurationError);
-            //     },
-            // }
+            let _ = serial_port.write(&mut buf);
         }
 
-        // check written feedback ---> open command
+        // check written feedback ---> close command
         {
             let mut buf = [0u8; 1];
-            let close_error = serial_port.read(&mut buf);
-            // match open_error {
-            //     Ok(size) => {
-            //         if (size != 1usize) && (buf[0] != b'\r') {
-            //             return Err(LawicelBuilderError::LawicelConfigurationError);
-            //         }
-            //     },
-            //     Err(_) => {
-            //         return Err(LawicelBuilderError::LawicelConfigurationError);
-            //     }
-            // }
+            let _ = serial_port.read(&mut buf);
         }
     }
 }
