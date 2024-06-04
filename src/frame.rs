@@ -1,3 +1,4 @@
+use core::time;
 use std::fmt::Debug;
 use std::str::FromStr;
 
@@ -6,7 +7,7 @@ pub const EXTENDED_MASK: u32 = 0x1FFFFFFF;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FrameType {
-    CanFrame,
+    DataFrame,
     RemoteFrame
 }
 
@@ -48,7 +49,7 @@ impl CanFrame {
 
     pub fn is_data_frame(&self) -> bool {
         match self.frame_type {
-            FrameType::CanFrame => true,
+            FrameType::DataFrame => true,
             _ => false,
         }
     }
@@ -109,8 +110,8 @@ impl PartialEq for CanFrame {
         }
 
         match (self.frame_type(), other.frame_type()) {
-            (FrameType::CanFrame, FrameType::RemoteFrame) => return false,
-            (FrameType::RemoteFrame, FrameType::CanFrame) => return false,
+            (FrameType::DataFrame, FrameType::RemoteFrame) => return false,
+            (FrameType::RemoteFrame, FrameType::DataFrame) => return false,
             _ => {}
         }
 
@@ -145,7 +146,7 @@ impl CanFrameBuilder {
         CanFrameBuilder {
             can_id: 0,
             identifier_format: IdentifierFormat::Standard,
-            frame_type: FrameType::CanFrame,
+            frame_type: FrameType::DataFrame,
             dlc: 0,
             data: [0u8; 8],
             timestamp: 0
@@ -247,7 +248,7 @@ impl From<CanFrameBuilder> for CanFrame {
         CanFrame {
             can_id: value.can_id,
             identifier_format: value.identifier_format,
-            frame_type: FrameType::CanFrame,
+            frame_type: FrameType::DataFrame,
             dlc: value.dlc,
             data: value.data,
             timestamp: value.timestamp
@@ -277,18 +278,22 @@ impl TryFrom<&[u8]> for CanFrame {
             _ => return Err(CanFrameParseError::InvalidSize)
         };
 
-        // check identifier format
-        let identifier_format = match expected_format {
+        // compute identifier format and frame type
+        let (identifier_format, frame_type) = match expected_format {
             IdentifierFormat::Standard => {
                 if value[0] == b't' {
-                    expected_format
+                    (expected_format, FrameType::DataFrame)
+                } else if value[0] == b'r' {
+                    (expected_format, FrameType::RemoteFrame)
                 } else {
                     return Err(CanFrameParseError::MessageStartError)
                 }
             },
             IdentifierFormat::Extended => {
                 if value[0] == b'T' {
-                    expected_format
+                    (expected_format, FrameType::DataFrame)
+                } else if value[0] == b'R' {
+                    (expected_format, FrameType::RemoteFrame)
                 } else {
                     return Err(CanFrameParseError::MessageStartError)
                 }
@@ -298,25 +303,35 @@ impl TryFrom<&[u8]> for CanFrame {
         // compute CAN ID
         let can_id = match identifier_format {
             IdentifierFormat::Standard => {
-                match std::str::from_utf8(&value[1..1+3]) {
-                    Ok(string) => {
-                        match u32::from_str_radix(string, 16) {
-                            Ok(v) => v,
-                            Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                match value.get(1..1+3) {
+                    Some(slice) => {
+                        match std::str::from_utf8(slice) {
+                            Ok(string) => {
+                                match u32::from_str_radix(string, 16) {
+                                    Ok(v) => v,
+                                    Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                                }
+                            },
+                            Err(_) => return Err(CanFrameParseError::Utf8Error)
                         }
                     },
-                    Err(_) => return Err(CanFrameParseError::Utf8Error)
+                    None => return Err(CanFrameParseError::DataError)
                 }
             },
             IdentifierFormat::Extended => {
-                match std::str::from_utf8(&value[1..1+8]) {
-                    Ok(string) => {
-                        match u32::from_str_radix(string, 16) {
-                            Ok(v) => v,
-                            Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                match value.get(1..1+8) {
+                    Some(slice) => {
+                        match std::str::from_utf8(slice) {
+                            Ok(string) => {
+                                match u32::from_str_radix(string, 16) {
+                                    Ok(v) => v,
+                                    Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                                }
+                            },
+                            Err(_) => return Err(CanFrameParseError::Utf8Error)
                         }
                     },
-                    Err(_) => return Err(CanFrameParseError::Utf8Error)
+                    None => return Err(CanFrameParseError::DataError)
                 }
             }
         };
@@ -324,25 +339,35 @@ impl TryFrom<&[u8]> for CanFrame {
         // compute DLC
         let dlc = match identifier_format {
             IdentifierFormat::Standard => {
-                match std::str::from_utf8(&value[4..4+1]) {
-                    Ok(string) => {
-                        match u8::from_str_radix(string, 16) {
-                            Ok(v) => v,
-                            Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                match value.get(4..4+1) {
+                    Some(slice) => {
+                        match std::str::from_utf8(slice) {
+                            Ok(string) => {
+                                match u8::from_str_radix(string, 16) {
+                                    Ok(v) => v,
+                                    Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                                }
+                            },
+                            Err(_) => return Err(CanFrameParseError::Utf8Error)
                         }
                     },
-                    Err(_) => return Err(CanFrameParseError::Utf8Error)
+                    None => return Err(CanFrameParseError::DataError)
                 }
             },
             IdentifierFormat::Extended => {
-                match std::str::from_utf8(&value[9..9+1]) {
-                    Ok(string) => {
-                        match u8::from_str_radix(string, 16) {
-                            Ok(v) => v,
-                            Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                match value.get(9..9+1) {
+                    Some(slice) => {
+                        match std::str::from_utf8(slice) {
+                            Ok(string) => {
+                                match u8::from_str_radix(string, 16) {
+                                    Ok(v) => v,
+                                    Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                                }
+                            },
+                            Err(_) => return Err(CanFrameParseError::Utf8Error)
                         }
                     },
-                    Err(_) => return Err(CanFrameParseError::Utf8Error)
+                    None => return Err(CanFrameParseError::DataError)
                 }
             }
         };
@@ -355,232 +380,378 @@ impl TryFrom<&[u8]> for CanFrame {
         let has_timestamp = match value.len() {
             // STD, DLC=0
             6 => {
-                if dlc != 0 {
-                    return Err(CanFrameParseError::DlcError);
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 0 {
+                            return Err(CanFrameParseError::DlcError);
+                        }
+                        false
+                    },
+                    FrameType::RemoteFrame => false
                 }
-                false
             },
             // STD, DLC=1
             8 => {
-                if dlc != 1 {
-                    return Err(CanFrameParseError::DlcError);
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 1 {
+                            return Err(CanFrameParseError::DlcError);
+                        }
+                        false
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    },
                 }
-                false
             },
             // STD, DLC=2 (STD, DLC=0, T)
             10 => {
-                if (dlc != 2) && (dlc != 0) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 0 {
-                        true
-                    } else {
-                        false
-                    }
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 2) && (dlc != 0) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 0 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => true
                 }
             },
             // STD, DLC=3 (STD, DLC=1, T)
             12 => {
-                if (dlc != 3) && (dlc != 1) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 1 {
-                        true
-                    } else {
-                        false
-                    }
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 3) && (dlc != 1) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 1 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    },
                 }
             },
             // STD, DLC=4 (STD, DLC=2, T)
             14 => {
-                if (dlc != 4) && (dlc != 2) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 2 {
-                        true
-                    } else {
-                        false
-                    }
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 4) && (dlc != 2) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 2 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    },
                 }
             },
             // STD, DLC=5 (STD, DLC=3, T)
             16 => {
-                if (dlc != 5) && (dlc != 3) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 3 {
-                        true
-                    } else {
-                        false
-                    }
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 5) && (dlc != 3) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 3 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    },
                 }
             },
             // STD, DLC=6 (STD, DLC=4, T)
             18 => {
-                if (dlc != 6) && (dlc != 4) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 4 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 6) && (dlc != 4) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 4 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize)
                     }
                 }
             },
             // STD, DLC=7 (STD, DLC=5, T)
             20 => {
-                if (dlc != 7) && (dlc != 5) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 5 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 7) && (dlc != 5) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 5 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // STD, DLC=8 (STD, DLC=6, T)
             22 => {
-                if (dlc != 8) && (dlc != 6) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 6 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 8) && (dlc != 6) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 6 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // STD, DLC=7, T
             24 => {
-                if dlc != 7 {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    true
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 7 {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            true
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    }
                 }
             },
             // STD, DLC=8, T
             26 => {
-                if dlc != 8 {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    true
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 8 {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            true
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    }
                 }
             },
             // EXT, DLC=0
             11 => {
-                if dlc != 0 {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 0 {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            false
+                        }
+                    },
+                    FrameType::RemoteFrame => false
                 }
             },
             // EXT, DLC=1
             13 => {
-                if dlc != 1 {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 1 {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            false
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    }
                 }
             },
             // EXT, DLC=2 (EXT, DLC=0, T)
             15 => {
-                if (dlc != 2) && (dlc != 0) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 0 {
-                        true
-                    } else {
-                        false
-                    }
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 2) && (dlc != 0) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 0 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => true,
                 }
             },
             // EXT, DLC=3 (EXT, DLC=1, T)
             17 => {
-                if (dlc != 3) && (dlc != 1) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 1 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 3) && (dlc != 1) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 1 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // EXT, DLC=4 (EXT, DLC=2, T)
             19 => {
-                if (dlc != 4) && (dlc != 2) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 2 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 4) && (dlc != 2) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 2 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // EXT, DLC=5 (EXT, DLC=3, T)
             21 => {
-                if (dlc != 5) && (dlc != 3) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 3 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 5) && (dlc != 3) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 3 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // EXT, DLC=6 (EXT, DLC=4, T)
             23 => {
-                if (dlc != 6) && (dlc != 4) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 4 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 6) && (dlc != 4) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 4 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // EXT, DLC=7 (EXT, DLC=5, T)
             25 => {
-                if (dlc != 7) && (dlc != 5) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 5 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 7) && (dlc != 5) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 5 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // EXT, DLC=8 (EXT, DLC=6, T)
             27 => {
-                if (dlc != 8) && (dlc != 6) {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    if dlc == 6 {
-                        true
-                    } else {
-                        false
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if (dlc != 8) && (dlc != 6) {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            if dlc == 6 {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
                     }
                 }
             },
             // EXT, DLC=7, T
             29 => {
-                if dlc != 7 {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    true
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 7 {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            true
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    }
                 }
             },
             // EXT, DLC=8, T
             31 => {
-                if dlc != 8 {
-                    return Err(CanFrameParseError::DlcError);
-                } else {
-                    true
+                match frame_type {
+                    FrameType::DataFrame => {
+                        if dlc != 8 {
+                            return Err(CanFrameParseError::DlcError);
+                        } else {
+                            true
+                        }
+                    },
+                    FrameType::RemoteFrame => {
+                        return Err(CanFrameParseError::InvalidSize);
+                    }
                 }
             },
             _ => {
@@ -590,44 +761,67 @@ impl TryFrom<&[u8]> for CanFrame {
 
         // extract data
         let mut buf = [0u8; 8];
-        match &identifier_format {
-            IdentifierFormat::Standard => {
-                for i in 0..dlc {
-                    let byte = match std::str::from_utf8(&value[(5+2*i) as usize..(5+2*i+2) as usize]) {
-                        Ok(string) => {
-                            match u8::from_str_radix(string, 16) {
-                                Ok(v) => v,
-                                Err(_) => return Err(CanFrameParseError::IntegerParseError)
-                            }
-                        },
-                        Err(_) => return Err(CanFrameParseError::Utf8Error)
-                    };
-        
-                    buf[i as usize] = byte;
+        match frame_type {
+            FrameType::DataFrame => {
+                match &identifier_format {
+                    IdentifierFormat::Standard => {
+                        for i in 0..dlc {
+                            let index = (5+(2*i)) as usize..(5+(2*i)+2) as usize;
+                            let byte = match value.get(index) {
+                                Some(slice) => {
+                                    match std::str::from_utf8(slice) {
+                                        Ok(string) => {
+                                            match u8::from_str_radix(string, 16) {
+                                                Ok(v) => v,
+                                                Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                                            }
+                                        },
+                                        Err(_) => return Err(CanFrameParseError::Utf8Error)
+                                    }
+                                },
+                                None => return Err(CanFrameParseError::DataError)
+                            };                
+                            buf[i as usize] = byte;
+                        }
+                    },
+                    IdentifierFormat::Extended => {
+                        for i in 0..dlc {
+                            let index = (10+(2*i)) as usize..(10+(2*i)+2) as usize;
+                            let byte = match value.get(index) {
+                                Some(slice) => {
+                                    match std::str::from_utf8(slice) {
+                                        Ok(string) => {
+                                            match u8::from_str_radix(string, 16) {
+                                                Ok(v) => v,
+                                                Err(_) => return Err(CanFrameParseError::IntegerParseError)
+                                            }
+                                        },
+                                        Err(_) => return Err(CanFrameParseError::Utf8Error)
+                                    }
+                                },
+                                None => return Err(CanFrameParseError::DataError)
+                            };                
+                            buf[i as usize] = byte;
+                        }
+                    },
                 }
             },
-            IdentifierFormat::Extended => {
-                for i in 0..dlc {
-                    let byte = match std::str::from_utf8(&value[(10+2*i) as usize..(10+2*i+2) as usize]) {
-                        Ok(string) => {
-                            match u8::from_str_radix(string, 16) {
-                                Ok(v) => v,
-                                Err(_) => return Err(CanFrameParseError::IntegerParseError)
-                            }
-                        },
-                        Err(_) => return Err(CanFrameParseError::Utf8Error)
-                    };
-        
-                    buf[i as usize] = byte;
-                }
-            },
+            FrameType::RemoteFrame => {}
         }
 
         // extract timestamp
-        let timestamp = if has_timestamp == true {
-            match &identifier_format {
-                IdentifierFormat::Standard => {
-                    match std::str::from_utf8(&value[(5+2*dlc) as usize..(5+2*dlc+4) as usize]) {
+        let timestamp = if has_timestamp {
+            let range = {
+                match (&identifier_format, &frame_type) {
+                    (IdentifierFormat::Standard, FrameType::DataFrame) => (5+2*dlc) as usize..(5+(2*dlc)+4) as usize,
+                    (IdentifierFormat::Standard, FrameType::RemoteFrame) => 5..(5+4),
+                    (IdentifierFormat::Extended, FrameType::DataFrame) => (10+2*dlc) as usize..(10+(2*dlc)+4) as usize,
+                    (IdentifierFormat::Extended, FrameType::RemoteFrame) => 10..(10+4),
+                }
+            };
+            let timestamp = match value.get(range) {
+                Some(slice) => {
+                    match std::str::from_utf8(slice) {
                         Ok(string) => {
                             match u16::from_str_radix(string, 16) {
                                 Ok(v) => v,
@@ -641,39 +835,32 @@ impl TryFrom<&[u8]> for CanFrame {
                         }
                     }
                 },
-                IdentifierFormat::Extended => {
-                    match std::str::from_utf8(&value[(10+2*dlc) as usize..(10+2*dlc+4) as usize]) {
-                        Ok(string) => {
-                            match u16::from_str_radix(string, 16) {
-                                Ok(v) => v,
-                                Err(_) => {
-                                    return Err(CanFrameParseError::IntegerParseError);
-                                }
-                            }
-                        },
-                        Err(_) => {
-                            return Err(CanFrameParseError::Utf8Error);
-                        }
-                    }
-                },
-            }
+                None => return Err(CanFrameParseError::DataError)
+            };
+            timestamp
         } else {
             0
         };
-        
+    
         // check timestamp
         if timestamp >= 60000 {
             return Err(CanFrameParseError::TimestampError);
         }
 
         // check carriage return
-        if value[value.len()-1] != b'\r' {
-            return Err(CanFrameParseError::MessageTerminationError);
+        match value.get(value.len()-1) {
+            Some(slice) => {
+                if *slice != b'\r' {
+                    return Err(CanFrameParseError::MessageTerminationError);
+                }
+            },  
+            None => return Err(CanFrameParseError::MessageTerminationError)
         }
 
         // build frame
         let builder = CanFrameBuilder::new()
             .can_id(can_id, identifier_format)
+            .frame_type(frame_type)
             .dlc(dlc)
             .data(&buf)
             .timestamp(timestamp);
@@ -695,7 +882,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_std_data_frame_001() {
+    fn parse_std_data_frame_dlc_0() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x123, IdentifierFormat::Standard)
             .dlc(0)
@@ -707,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_002() {
+    fn parse_std_data_frame_dlc_1() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x611, IdentifierFormat::Standard)
             .dlc(1)
@@ -720,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_003() {
+    fn parse_std_data_frame_dlc_2() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x612, IdentifierFormat::Standard)
             .dlc(2)
@@ -734,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_004() {
+    fn parse_std_data_frame_dlc_3() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x613, IdentifierFormat::Standard)
             .dlc(3)
@@ -749,7 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_005() {
+    fn parse_std_data_frame_dlc_4() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x613, IdentifierFormat::Standard)
             .dlc(4)
@@ -765,7 +952,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_006() {
+    fn parse_std_data_frame_dlc_5() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x613, IdentifierFormat::Standard)
             .dlc(5)
@@ -782,7 +969,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_007() {
+    fn parse_std_data_frame_dlc_6() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x613, IdentifierFormat::Standard)
             .dlc(6)
@@ -800,7 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_008() {
+    fn parse_std_data_frame_dlc_7() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x613, IdentifierFormat::Standard)
             .dlc(7)
@@ -819,7 +1006,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_std_data_frame_009() {
+    fn parse_std_data_frame_dlc_8() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x613, IdentifierFormat::Standard)
             .dlc(8)
@@ -841,7 +1028,7 @@ mod tests {
     /* STD FRAME ---> TIMESTAMP */
 
     #[test]
-    fn parse_std_data_frame_timestamp_001() {
+    fn parse_std_data_frame_dlc_0_timestamp() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x613, IdentifierFormat::Standard)
             .dlc(0)
@@ -854,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_001() {
+    fn parse_ext_data_frame_dlc_0() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(0)
@@ -866,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_002() {
+    fn parse_ext_data_frame_dlc_1() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(1)
@@ -879,7 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_003() {
+    fn parse_ext_data_frame_dlc_2() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(2)
@@ -897,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_004() {
+    fn parse_ext_data_frame_dlc_3() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(3)
@@ -912,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_005() {
+    fn parse_ext_data_frame_dlc_4() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(4)
@@ -928,7 +1115,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_006() {
+    fn parse_ext_data_frame_dlc_5() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(5)
@@ -945,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_007() {
+    fn parse_ext_data_frame_dlc_6() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(6)
@@ -967,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_008() {
+    fn parse_ext_data_frame_dlc_7() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(7)
@@ -986,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ext_data_frame_009() {
+    fn parse_ext_data_frame_dlc_8() {
         let frame: CanFrame = CanFrameBuilder::new()
             .can_id(0x0C00AABB, IdentifierFormat::Extended)
             .dlc(8)
@@ -1001,6 +1188,240 @@ mod tests {
             .into();
 
         let string = "T0C00AABB8CCDDEEDDCCBBAAFF\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_0() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x612, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(0)
+            .into();
+
+        let string = "r6120\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_1() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x765, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(1)
+            .into();
+
+        let string = "r7651\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_2() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x654, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(2)
+            .into();
+
+        let string = "r6542\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_3() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x543, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(3)
+            .into();
+
+        let string = "r5433\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_4() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x789, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(4)
+            .into();
+
+        let string = "r7894\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_5() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x79A, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(5)
+            .into();
+
+        let string = "r79A5\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_6() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x7AB, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(6)
+            .into();
+
+        let string = "r7AB6\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_7() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x7CD, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(7)
+            .into();
+
+        let string = "r7CD7\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_std_remote_frame_dlc_8() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x7EF, IdentifierFormat::Standard)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(8)
+            .into();
+
+        let string = "r7EF8\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_0() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x18010203, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(0)
+            .into();
+
+        let string = "R180102030\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_1() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x00001101, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(1)
+            .into();
+
+        let string = "R000011011\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_2() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x0CFFAABB, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(2)
+            .into();
+
+        let string = "R0CFFAABB2\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_3() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x18192021, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(3)
+            .into();
+
+        let string = "R181920213\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_4() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x18192021, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(4)
+            .into();
+
+        let string = "R181920214\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_5() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x18192021, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(5)
+            .into();
+
+        let string = "R181920215\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_6() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x18192021, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(6)
+            .into();
+
+        let string = "R181920216\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_7() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x18192021, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(7)
+            .into();
+
+        let string = "R181920217\r";
+        let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
+        assert!(frame == parse_frame)
+    }
+
+    #[test]
+    fn parse_ext_remote_frame_dlc_8() {
+        let frame: CanFrame = CanFrameBuilder::new()
+            .can_id(0x18192021, IdentifierFormat::Extended)
+            .frame_type(FrameType::RemoteFrame)
+            .dlc(8)
+            .into();
+
+        let string = "R181920218\r";
         let parse_frame: CanFrame = string.as_bytes().try_into().unwrap();
         assert!(frame == parse_frame)
     }
