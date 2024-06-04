@@ -377,7 +377,7 @@ impl LawicelCanUsb {
                         break;
                     }
                 },
-                Err(_) => break
+                Err(_) => continue,
             }
         }
 
@@ -484,20 +484,6 @@ impl LawicelCanUsb {
 
         println!("T7");
 
-        
-        // match serial_port.read(&mut buf) {
-        //     Ok(size) => {
-        //         println!("{:?}", &buf[..size]);
-        //         if size < 2usize {
-        //             return Err(LawicelCanUsbSendError::DataLossError);
-        //         }  
-        //     },
-        //     Err(err) => {
-        //         println!("{:?}", err);
-        //         return Err(LawicelCanUsbSendError::DataLossError);
-        //     }
-        // }
-
         // check written feedback ---> transmit commmand
         let mut cursor = Cursor::new(&mut buf[..]);
         loop {
@@ -509,34 +495,48 @@ impl LawicelCanUsb {
                         break;
                     }
                 },
-                Err(_) => break
+                Err(_) => continue
             }
         }
 
         // check data
+        println!("Pos ---> {}", cursor.position());
         return match cursor.position() {
             1 => {
+                println!("I am here 1");
+                println!("{:?}", &buf[..]);
                 // check for bell character
                 if buf[0] == b'\x07' {
+                    println!("I am here 1.1");
                     Err(LawicelCanUsbSendError::UnsuccessfulSend)
                 } else {
+                    println!("I am here 1.2");
                     Err(LawicelCanUsbSendError::IncorrectResponse)
                 }
             }, 
             2 => {
+                println!("I am here 2");
+                println!("{:?}", &buf[..]);
+                println!("{:?}", &buf[..2]);
                 // check identifier format - z for standard and Z for extended
                 match frame.identifier_format() {
                     IdentifierFormat::Standard => {
-                        if &buf[..2] == &[b'z', b'\r'] {
+                        if &buf[0..2] == &[b'z', b'\r'] {
+                            println!("I am here 2.1");
+                            println!("{:?}", &[b'z', b'\r']);
                             Ok(())
                         } else {
+                            println!("I am here 2.2");
                             Err(LawicelCanUsbSendError::IncorrectResponse)
                         }
                     },
                     IdentifierFormat::Extended => {
-                        if &buf[..2] == [b'Z', b'\r'] {
+                        if &buf[0..2] == [b'Z', b'\r'] {
+                            println!("I am here 2.3");
+                            println!("{:?}", &[b'z', b'\r']);
                             Ok(())
                         } else {
+                            println!("I am here 2.4");
                             return Err(LawicelCanUsbSendError::IncorrectResponse)
                         }
                     },
@@ -549,8 +549,8 @@ impl LawicelCanUsb {
     pub fn status(&self) -> Result<Status, ()> {
         let mut serial_port = self.serial_port.borrow_mut();
         {
-            let mut buf = [b'F', b'\r'];
-            match serial_port.write(&mut buf) {
+            let buf = [b'F', b'\r'];
+            match serial_port.write(&buf) {
                 Ok(size) => {
                     if size != 2usize {
                         return Err(());
