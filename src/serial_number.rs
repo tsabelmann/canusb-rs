@@ -100,3 +100,59 @@ impl FromStr for SerialNumber {
         SerialNumber::try_from(s.as_bytes())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_serial_number_001() {
+        let serial_number = SerialNumber::new("M206").unwrap();
+        let string = "NM206\r";
+        let parse_serial_number= string.parse::<SerialNumber>().unwrap();
+        assert!(serial_number == parse_serial_number)
+    }
+
+    #[test]
+    fn parse_serial_number_002() {
+        let serial_number = SerialNumber::new("M207").unwrap();
+        let string = "NM207\r";
+        let parse_serial_number= string.parse::<SerialNumber>().unwrap();
+        assert!(serial_number == parse_serial_number)
+    }
+
+    #[test]
+    fn parse_serial_number_003() {
+        let serial_number = SerialNumber::new("M207").unwrap();
+        let string = "NM206\r";
+        let parse_serial_number= string.parse::<SerialNumber>().unwrap();
+        assert!(serial_number != parse_serial_number)
+    }
+
+    #[test]
+    #[should_panic]
+    fn parse_serial_number_004() {
+        let serial_number = SerialNumber::new("M207 ").unwrap();
+        let string = "NM207\r";
+        let parse_serial_number= string.parse::<SerialNumber>().unwrap();
+        assert!(serial_number != parse_serial_number)
+    }
+
+    #[test]
+    #[should_panic]
+    fn parse_serial_number_005() {
+        let serial_number = SerialNumber::new("M207").unwrap();
+        let string = "TM207\r";
+        let parse_serial_number= string.parse::<SerialNumber>().unwrap();
+        assert!(serial_number != parse_serial_number)
+    }
+
+    #[test]
+    #[should_panic]
+    fn parse_serial_number_006() {
+        let serial_number = SerialNumber::new("M207").unwrap();
+        let string = "NM207";
+        let parse_serial_number= string.parse::<SerialNumber>().unwrap();
+        assert!(serial_number != parse_serial_number)
+    }
+}
