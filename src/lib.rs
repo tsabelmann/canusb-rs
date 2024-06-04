@@ -3,4 +3,4 @@ pub mod can232;
 pub mod frame;
 pub mod bitrate;
 pub mod status;
-pub(crate) mod serial;
+pub mod serial_number;
