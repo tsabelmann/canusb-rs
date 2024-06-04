@@ -9,6 +9,7 @@ use std::time::Duration;
 pub use crate::frame::{CanFrame, CanFrameParseError, IdentifierFormat};
 pub use crate::bitrate::Bitrate;
 pub use crate::status::Status;
+pub use crate::serial_number::SerialNumber;
 
 pub struct LawicelCanUsbBuilder {
     path: String,
@@ -585,6 +586,52 @@ impl LawicelCanUsb {
                 },
             }
         }
+    }
+
+    pub fn serial_number(&self) -> Result<SerialNumber, ()> {
+        let mut port = self.serial_port.borrow_mut();
+        {
+            let buf = [b'N', b'\r'];
+            match port.write(&buf) {
+                Ok(size) => {
+                    if size != 2usize {
+                        return Err(());
+                    }
+                },
+                Err(_) => {
+                    return Err(());
+                },
+            }
+        }
+
+        let mut buf = [b'\0'; 6];
+        let mut cursor = Cursor::new(&mut buf[..]);
+        loop {
+            let mut intbuf = [b'\0'; 1];
+            match port.read_exact(&mut intbuf) {
+                Ok(_) => {
+                    let _ = cursor.write(&intbuf);
+                    if (intbuf[0] == b'\r') || (intbuf[0] == b'\x07') {
+                        break;
+                    }
+                },
+                Err(_) => break
+            }
+        }
+
+        let pos = cursor.position();
+        if pos > 0 {
+            println!("Size ---> {}", pos);
+        }
+        return match buf.get(0..pos as usize) {
+            Some(slice) => {
+                match SerialNumber::try_from(slice) {
+                    Ok(serial_number) => Ok(serial_number),
+                    Err(_) => Err(())
+                }
+            },
+            None => Err(())
+        };
     }
 
     fn close(&self) {
