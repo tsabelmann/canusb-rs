@@ -6,7 +6,7 @@ use std::io::{Cursor, Write};
 use std::str;
 use std::time::Duration;
 
-pub use crate::frame::{CanFrame, DataFrame, DataFrameParseError, RemoteFrame, IdentifierFormat};
+pub use crate::frame::{CanFrame, CanFrameParseError, IdentifierFormat};
 pub use crate::bitrate::Bitrate;
 pub use crate::status::Status;
 
@@ -80,7 +80,7 @@ impl LawicelCanUsbBuilder {
             .stop_bits(serialport::StopBits::One)
             .parity(serialport::Parity::None)
             .flow_control(serialport::FlowControl::None)
-            .timeout(Duration::from_micros(2500))
+            .timeout(Duration::from_micros(1000))
             .open();
 
         // unmarshalling of the serialport
@@ -93,9 +93,37 @@ impl LawicelCanUsbBuilder {
             }
         };
 
+        // send 2-3 carriage return character
+        {
+            let mut buf = [b'\r', b'\r', b'\r'];
+            match serial_port.write(&buf) {
+                Ok(size) => {
+                    if size != 3usize {
+                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                    }
+                },
+                Err(_) => {
+                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                },
+            }
+            buf = [b'\0', b'\0', b'\0'];
+            match serial_port.read(&mut buf) {
+                Ok(size) => {
+                    if size != 3usize {
+                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                    }
+                },
+                Err(_) => {
+                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                },
+            }
+            if buf != [b'\r', b'\r', b'\r'] {
+                return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+            }
+        }
+
         // close Lawicel if not closed correctly
         {
-            let _ = serial_port.clear(serialport::ClearBuffer::All);
             let mut buf: [u8; 2] = [b'C', b'\r'];
             match serial_port.write(&mut buf) {
                 Ok(size) => {
@@ -107,7 +135,6 @@ impl LawicelCanUsbBuilder {
                     return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
                 },
             }
-            let _ = serial_port.clear(serialport::ClearBuffer::Input);
         }
 
         // check written feedback ---> close command
@@ -297,7 +324,8 @@ pub enum LawicelCanUsbSendError {
     FormatError,
     SizeMismatchError,
     DataLossError,
-    IncorrectResponse
+    IncorrectResponse,
+    UnsuccessfulSend
 }
 
 #[derive(Debug)]
@@ -310,53 +338,68 @@ pub enum LawicelCanUsbReceiveError {
 }
 
 impl LawicelCanUsb {
-    pub fn recv_data_frame(&self) -> Result<DataFrame, LawicelCanUsbReceiveError> {
+    pub fn recv(&self) -> Result<CanFrame, LawicelCanUsbReceiveError> {
         // read data
         let mut buf = [b'\0'; 31];
+        let mut cursor = Cursor::new(&mut buf[..]);
         let mut port = self.serial_port.borrow_mut();
-        let size = match port.read(&mut buf) {
-            Ok(size) => {
-                size
-            },
-            Err(_) => {
-                return Err(LawicelCanUsbReceiveError::NoDataError)
-            }
-        };
+        
+        // let size = match port.read(&mut buf) {
+        //     Ok(size) => {
+        //         size
+        //     },
+        //     Err(_) => {
+        //         return Err(LawicelCanUsbReceiveError::NoDataError)
+        //     }
+        // };
 
-        let frame = match DataFrame::try_from(&buf[..size]) {
-            Ok(frame) => frame,
+        // let frame = match DataFrame::try_from(&buf[..size]) {
+        //     Ok(frame) => frame,
+        //     Err(err) => {
+        //         match err {
+        //             DataFrameParseError::InvalidSize => {
+        //                 return Err(LawicelCanUsbReceiveError::SizeMismatchError);
+        //             },
+        //             _ => {
+        //                 return Err(LawicelCanUsbReceiveError::ParseError);
+        //             }
+        //         }
+        //     }
+        // };
+
+        loop {
+            let mut intbuf = [b'\0'; 1];
+            match port.read_exact(&mut intbuf) {
+                Ok(_) => {
+                    let _ = cursor.write(&intbuf);
+                    if (intbuf[0] == b'\r') || (intbuf[0] == b'\x07') {
+                        break;
+                    }
+                },
+                Err(_) => break
+            }
+        }
+
+        let pos = cursor.position();
+        if pos > 0 {
+            println!("Size ---> {}", pos);
+        }
+        return match CanFrame::try_from(&buf[..pos as usize]) {
+            Ok(frame) => Ok(frame),
             Err(err) => {
                 match err {
-                    DataFrameParseError::InvalidSize => {
-                        return Err(LawicelCanUsbReceiveError::SizeMismatchError);
+                    CanFrameParseError::InvalidSize => {
+                        Err(LawicelCanUsbReceiveError::SizeMismatchError)
                     },
                     _ => {
-                        return Err(LawicelCanUsbReceiveError::ParseError);
+                        Err(LawicelCanUsbReceiveError::ParseError)
                     }
                 }
             }
         };
-
-        Ok(frame)
     }
 
-    pub fn recv_remote_frame(&self) -> Result<RemoteFrame, LawicelCanUsbReceiveError> {
-        Err(LawicelCanUsbReceiveError::DataLossError)
-    }
-
-    pub fn recv(&self) -> Result<CanFrame, LawicelCanUsbReceiveError> {
-        match self.recv_data_frame() {
-            Ok(frame) => Ok(frame.into()),
-            Err(_) => {
-                match self.recv_remote_frame() {
-                    Ok(frame) => Ok(frame.into()),
-                    Err(err) => Err(err)
-                }
-            }
-        }
-    }
-
-    pub fn send_data_frame(&self, frame: &DataFrame) -> Result<(), LawicelCanUsbSendError> {
+    pub fn send(&self, frame: &CanFrame) -> Result<(), LawicelCanUsbSendError> {
         let mut buf = [0u8; 27];
         let mut cursor = Cursor::new(&mut buf[..]);
         let mut index = 0u64;
@@ -422,12 +465,12 @@ impl LawicelCanUsb {
         println!("T5");
 
         let len = index as usize;
-        let mut serial_port = self.serial_port.borrow_mut();
+        let mut port = self.serial_port.borrow_mut();
 
         println!("T6");
 
         // check written bytes to the number of computed bytes
-        match serial_port.write(&mut buf[..len]) {
+        match port.write(&mut buf[..len]) {
             Ok(size) => {
                 if len != size {
                     return Err(LawicelCanUsbSendError::DataLossError)
@@ -440,7 +483,7 @@ impl LawicelCanUsb {
 
         println!("T7");
 
-        // check written feedback ---> transmit commmand
+        
         // match serial_port.read(&mut buf) {
         //     Ok(size) => {
         //         println!("{:?}", &buf[..size]);
@@ -454,134 +497,52 @@ impl LawicelCanUsb {
         //     }
         // }
 
-        match serial_port.read_exact(&mut buf[..2]) {
-            Ok(_) => {},
-            Err(err) => {
-                println!("{:?}", err);
-                return Err(LawicelCanUsbSendError::DataLossError);
-            }
-        }
-
-        println!("T8");
-
-        // check identifier format - z for standard and Z for extended
-        match frame.identifier_format() {
-            IdentifierFormat::Standard => {
-                if &buf[..2] == &[b'z', b'\r'] {
-                    return Ok(());
-                } else {
-                    return Err(LawicelCanUsbSendError::IncorrectResponse);
-                }
-            },
-            IdentifierFormat::Extended => {
-                if &buf[..2] == [b'Z', b'\r'] {
-                    return Ok(());
-                } else {
-                    return Err(LawicelCanUsbSendError::IncorrectResponse);
-                }
-            },
-        }
-    }
-
-    pub fn send_remote_frame(&self, frame: &RemoteFrame) -> Result<(), LawicelCanUsbSendError> {
-        let mut buf = [0u8; 11];
-        let mut cursor = Cursor::new(&mut buf[..]);
-        let mut index = 0u64;
-        
-        match frame.identifier_format() {
-            IdentifierFormat::Standard => {
-                index = 1 + 3 + 1 + 1;
-                
-                // format the beginning of the standard frame
-                match write!(cursor, "r{:03X}{:01X}", frame.can_id(), frame.dlc()) {
-                    Err(_) => {
-                        return Err(LawicelCanUsbSendError::FormatError);
-                    },
-                    _ => {}
-                }
-            },
-            IdentifierFormat::Extended => {
-                index = 1 + 8 + 1 + 1;
-                
-                // format the beginning of the extended frame
-                match write!(cursor, "R{:08X}{:01X}", frame.can_id(), frame.dlc()) {
-                    Err(_) => {
-                        return Err(LawicelCanUsbSendError::FormatError)
-                    },
-                    _ => {}
-                }
-            },
-        }
-
-        // write carriage return
-        match write!(cursor, "\r") {
-            Err(_) => {
-                return Err(LawicelCanUsbSendError::FormatError)
-            },
-            _ => {}
-        }
-        
-        // check that the computed index and the cursor index match
-        if index != cursor.position() {
-            return Err(LawicelCanUsbSendError::SizeMismatchError);
-        }
-
-        let len = index as usize;
-        let mut serial_port = self.serial_port.borrow_mut();
-
-        // check written bytes to the number of computed bytes
-        match serial_port.write(&mut buf[..len]) {
-            Ok(size) => {
-                if len != size {
-                    return Err(LawicelCanUsbSendError::DataLossError)
-                }
-            },
-            _ => {
-                return Err(LawicelCanUsbSendError::DataLossError)
-            }
-        }
-
         // check written feedback ---> transmit commmand
-        match serial_port.read(&mut buf) {
-            Ok(size) => {
-                if size != 2usize {
-                    return Err(LawicelCanUsbSendError::DataLossError);
-                }  
-            },
-            Err(_) => {
-                return Err(LawicelCanUsbSendError::DataLossError);
+        let mut cursor = Cursor::new(&mut buf[..]);
+        loop {
+            let mut intbuf = [b'\0'; 1];
+            match port.read_exact(&mut intbuf) {
+                Ok(_) => {
+                    let _ = cursor.write(&intbuf);
+                    if (intbuf[0] == b'\r') || (intbuf[0] == b'\x07') {
+                        break;
+                    }
+                },
+                Err(_) => break
             }
         }
 
-        // check identifier format - z for standard and Z for extended
-        match frame.identifier_format() {
-            IdentifierFormat::Standard => {
-                if &buf[..2] == &[b'z', b'\r'] {
-                    return Ok(());
+        // check data
+        return match cursor.position() {
+            1 => {
+                // check for bell character
+                if buf[0] == b'\x07' {
+                    Err(LawicelCanUsbSendError::UnsuccessfulSend)
                 } else {
-                    return Err(LawicelCanUsbSendError::IncorrectResponse);
+                    Err(LawicelCanUsbSendError::IncorrectResponse)
+                }
+            }, 
+            2 => {
+                // check identifier format - z for standard and Z for extended
+                match frame.identifier_format() {
+                    IdentifierFormat::Standard => {
+                        if &buf[..2] == &[b'z', b'\r'] {
+                            Ok(())
+                        } else {
+                            Err(LawicelCanUsbSendError::IncorrectResponse)
+                        }
+                    },
+                    IdentifierFormat::Extended => {
+                        if &buf[..2] == [b'Z', b'\r'] {
+                            Ok(())
+                        } else {
+                            return Err(LawicelCanUsbSendError::IncorrectResponse)
+                        }
+                    },
                 }
             },
-            IdentifierFormat::Extended => {
-                if &buf[..2] == [b'Z', b'\r'] {
-                    return Ok(());
-                } else {
-                    return Err(LawicelCanUsbSendError::IncorrectResponse);
-                }
-            },
-        }
-    }
-
-    pub fn send<T: Into<CanFrame>>(&self, value: T) -> Result<(), LawicelCanUsbSendError> {
-        let can_frame: CanFrame = value.into();
-        match can_frame {
-            CanFrame::DataFrame(frame) => {
-                return self.send_data_frame(&frame);
-            },
-            CanFrame::RemoteFrame(frame) => {
-                return self.send_remote_frame(&frame);
-            }
-        }
+            _ => Err(LawicelCanUsbSendError::IncorrectResponse)
+        };     
     }
 
     pub fn status(&self) -> Result<Status, ()> {
