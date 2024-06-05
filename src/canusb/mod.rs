@@ -331,8 +331,11 @@ pub enum LawicelCanUsbSendError {
 
 #[derive(Debug)]
 pub enum LawicelCanUsbReceiveError {
+    /// Parsing error, indicating that the data can not be transformed into a valid CAN frame.
     ParseError(CanFrameParseError),
+    /// The buffer error, indicating that the buffer is full and no data can be written to it.
     BufferError,
+    /// Data indexing failed during parsing due to not getting a valid slice.
     IndexingError
 }
 
@@ -348,6 +351,7 @@ impl LawicelCanUsb {
             let mut intbuf = [b'\0'; 1];
             match port.read_exact(&mut intbuf) {
                 Ok(_) => {
+                    // write read-buffer to cursor
                     match cursor.write(&intbuf)
                     {
                         Ok(1) => {},
@@ -363,13 +367,14 @@ impl LawicelCanUsb {
             }
         }
 
-        let pos = cursor.position();
-        if pos > 0 {
-            println!("Size ---> {}", pos);
-        }
+        // let pos = cursor.position();
+        // if pos > 0 {
+        //     println!("Size ---> {}", pos);
+        // }
 
         // parse CAN frame from data
-        return match buf.get(0..pos as usize) {
+        let pos = cursor.position() as usize;
+        return match buf.get(0..pos) {
             Some(slice) => {
                 match CanFrame::try_from(slice) {
                     Ok(frame) => Ok(frame),
