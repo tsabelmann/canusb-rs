@@ -1,4 +1,4 @@
-use canusb::frame::{DataFrame, IdentifierFormat};
+use canusb::frame::{CanFrame, IdentifierFormat};
 use canusb::bitrate::Bitrate;
 
 fn main() {
@@ -7,7 +7,7 @@ fn main() {
         .expect("Could not open /dev/ttyUSB0 with 500K bitrate");
 
     loop {
-        let frame: DataFrame = DataFrame::new()
+        let frame: CanFrame = CanFrame::new()
             .can_id(0x7FF, IdentifierFormat::Extended)
             .byte0(0x11)
             .byte1(0x22)
