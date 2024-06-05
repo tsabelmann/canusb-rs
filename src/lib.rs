@@ -4,3 +4,4 @@ pub mod frame;
 pub mod bitrate;
 pub mod status;
 pub mod serial_number;
+pub mod filter;
