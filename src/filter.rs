@@ -125,6 +125,51 @@ impl From<&AcceptanceMaskRegister> for u32 {
     }
 }
 
+struct Filter<'a> {
+    can_ids: &'a [u32],
+    acceptance_code_register: AcceptanceCodeRegister,
+    acceptance_mask_register: AcceptanceMaskRegister
+}
+
+impl Filter<'_> {
+    pub fn new(can_ids: &'static [u32]) -> Self {
+        if can_ids.len() == 0 {
+            return Self {
+                can_ids: can_ids,
+                acceptance_code_register: 0x00_00_00_00.into(),
+                acceptance_mask_register: 0xFF_FF_FF_FF.into()
+            };
+        }
+
+
+
+        Self {
+            can_ids: can_ids,
+            acceptance_code_register: 0.into(),
+            acceptance_mask_register: 0.into()
+        }
+    }
+
+    pub fn acceptance_code_register(&self) -> u32 {
+        u32::from(&self.acceptance_code_register)
+    }
+
+    pub fn acceptance_mask_register(&self) -> u32 {
+        u32::from(&self.acceptance_mask_register)
+    }
+
+    pub fn check(&self, can_id: u32) -> bool {
+        match self.can_ids.len() {
+            0 => true,
+            1 => self.can_ids[0] == can_id,
+            n => {
+                false
+            }
+        }
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,4 +193,18 @@ mod tests {
         assert!(value == register.register());
         assert!(from_value == register.register());
     }
+
+    // #[test]
+    // fn transform_acceptance_mask_register_001() {
+    //     let array = [0x6]
+    //     let filter = Filter::new()
+
+
+    //     let value = 0x12345678u32;
+    //     let register = AcceptanceMaskRegister::from(value);
+    //     let from_value = u32::from(&register);
+    //     assert!(value == from_value);
+    //     assert!(value == register.register());
+    //     assert!(from_value == register.register());
+    // }
 }
