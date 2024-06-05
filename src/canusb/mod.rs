@@ -331,48 +331,30 @@ pub enum LawicelCanUsbSendError {
 
 #[derive(Debug)]
 pub enum LawicelCanUsbReceiveError {
-    NoDataError,
-    SizeMismatchError,
-    ParseError,
-    DataLossError,
-    IncorrectResponse
+    ParseError(CanFrameParseError),
+    BufferError,
+    IndexingError
 }
 
 impl LawicelCanUsb {
     pub fn recv(&self) -> Result<CanFrame, LawicelCanUsbReceiveError> {
-        // read data
         let mut buf = [b'\0'; 31];
+        let size = buf.len();
         let mut cursor = Cursor::new(&mut buf[..]);
         let mut port = self.serial_port.borrow_mut();
         
-        // let size = match port.read(&mut buf) {
-        //     Ok(size) => {
-        //         size
-        //     },
-        //     Err(_) => {
-        //         return Err(LawicelCanUsbReceiveError::NoDataError)
-        //     }
-        // };
-
-        // let frame = match DataFrame::try_from(&buf[..size]) {
-        //     Ok(frame) => frame,
-        //     Err(err) => {
-        //         match err {
-        //             DataFrameParseError::InvalidSize => {
-        //                 return Err(LawicelCanUsbReceiveError::SizeMismatchError);
-        //             },
-        //             _ => {
-        //                 return Err(LawicelCanUsbReceiveError::ParseError);
-        //             }
-        //         }
-        //     }
-        // };
-
-        loop {
+        // read data
+        for _ in 0..(3*size) {
             let mut intbuf = [b'\0'; 1];
             match port.read_exact(&mut intbuf) {
                 Ok(_) => {
-                    let _ = cursor.write(&intbuf);
+                    match cursor.write(&intbuf)
+                    {
+                        Ok(1) => {},
+                        _ => return Err(LawicelCanUsbReceiveError::BufferError)
+                    }
+
+                    // terminate if the character is a carriage return or bell character
                     if (intbuf[0] == b'\r') || (intbuf[0] == b'\x07') {
                         break;
                     }
@@ -385,18 +367,16 @@ impl LawicelCanUsb {
         if pos > 0 {
             println!("Size ---> {}", pos);
         }
-        return match CanFrame::try_from(&buf[..pos as usize]) {
-            Ok(frame) => Ok(frame),
-            Err(err) => {
-                match err {
-                    CanFrameParseError::InvalidSize => {
-                        Err(LawicelCanUsbReceiveError::SizeMismatchError)
-                    },
-                    _ => {
-                        Err(LawicelCanUsbReceiveError::ParseError)
-                    }
+
+        // parse CAN frame from data
+        return match buf.get(0..pos as usize) {
+            Some(slice) => {
+                match CanFrame::try_from(slice) {
+                    Ok(frame) => Ok(frame),
+                    Err(err) => Err(LawicelCanUsbReceiveError::ParseError(err))
                 }
-            }
+            },
+            None => Err(LawicelCanUsbReceiveError::IndexingError)
         };
     }
 
