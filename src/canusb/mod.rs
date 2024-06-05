@@ -259,6 +259,64 @@ impl LawicelCanUsbBuilder {
             }
         }
 
+        // configure acceptance code register
+        let acceptance_code_register_error = {
+            let mut buffer: [u8; 10] = [0u8; 10];
+            let mut cursor = Cursor::new(&mut buffer[..]);
+            write!(cursor, "M{:08X}\r", self.acceptance_code_register).unwrap();
+            serial_port.write(&mut buffer)
+        };
+    
+        match acceptance_code_register_error {
+            Ok(10) => {
+                let mut buf = [0u8; 1];
+                match serial_port.read(&mut buf) {
+                    Ok(size) => {
+                        if size != 1usize {
+                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                        }
+
+                        if buf[0] != b'\r' {
+                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);   
+                        }
+                    },
+                    Err(_) => {
+                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                    }
+                }
+            },
+            _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError)
+        };
+
+        // configure acceptance mask register
+        let acceptance_mask_register_error = {
+            let mut buffer: [u8; 10] = [0u8; 10];
+            let mut cursor = Cursor::new(&mut buffer[..]);
+            write!(cursor, "m{:08X}\r", self.acceptance_mask_register).unwrap();
+            serial_port.write(&mut buffer)
+        };
+    
+        match acceptance_mask_register_error {
+            Ok(10) => {
+                let mut buf = [0u8; 1];
+                match serial_port.read(&mut buf) {
+                    Ok(size) => {
+                        if size != 1usize {
+                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                        }
+
+                        if buf[0] != b'\r' {
+                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);   
+                        }
+                    },
+                    Err(_) => {
+                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                    }
+                }
+            },
+            _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError)
+        };
+
         // check bitrate feedback ---> bitrate command
         {
             let mut buf = [0u8; 1];
