@@ -367,11 +367,6 @@ impl LawicelCanUsb {
             }
         }
 
-        // let pos = cursor.position();
-        // if pos > 0 {
-        //     println!("Size ---> {}", pos);
-        // }
-
         // parse CAN frame from data
         let pos = cursor.position() as usize;
         return match buf.get(0..pos) {
