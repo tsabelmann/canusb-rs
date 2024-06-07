@@ -6,8 +6,7 @@ use std::io::{Cursor, Write};
 use std::str;
 use std::time::Duration;
 
-use cantypes::filter::{CanIdFilter, ExtendedCanIdFilter, StandardCanIdFilter, MaskType};
-use cantypes::constants::{STANDARD_FRAME_ID_LENGTH, EXTENDED_FRAME_ID_LENGTH};
+use cantypes::filter::{CanIdFilter};
 
 use crate::filter::{AcceptanceCodeRegister, AcceptanceMaskRegister};
 pub use crate::frame::{CanFrame, CanFrameParseError, IdentifierFormat};
@@ -62,7 +61,6 @@ impl LawicelCanUsbBuilder {
     pub fn single_filter<T: CanIdFilter>(mut self, filter: &T) -> Self {
         let code_register = AcceptanceCodeRegister::from_single_filter(filter);
         let mask_register = AcceptanceMaskRegister::from_single_filter(filter);
-
         self.acceptance_code_register(&code_register).acceptance_mask_register(&mask_register)
     }
 
