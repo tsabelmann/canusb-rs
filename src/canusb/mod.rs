@@ -58,7 +58,7 @@ impl LawicelCanUsbBuilder {
         self
     }
 
-    pub fn single_filter<T: CanIdFilter>(mut self, filter: &T) -> Self {
+    pub fn single_filter<T: CanIdFilter>(self, filter: &T) -> Self {
         let code_register = AcceptanceCodeRegister::from_single_filter(filter);
         let mask_register = AcceptanceMaskRegister::from_single_filter(filter);
         self.acceptance_code_register(&code_register).acceptance_mask_register(&mask_register)
