@@ -1,3 +1,6 @@
+use cantypes::filter::{CanIdFilter, MaskType};
+use cantypes::constants::{STANDARD_FRAME_ID_LENGTH, EXTENDED_FRAME_ID_LENGTH};
+
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct AcceptanceCodeRegister {
@@ -10,6 +13,27 @@ pub struct AcceptanceCodeRegister {
 impl AcceptanceCodeRegister {
     pub fn new(acr0: u8, acr1: u8, acr2: u8, acr3: u8) -> Self {
         AcceptanceCodeRegister { acr0, acr1, acr2, acr3 }
+    }
+
+    pub fn from_single_filter<T: CanIdFilter>(value: &T) -> Self {
+        match value.mask_type() {
+            MaskType::Standard => {
+                AcceptanceCodeRegister::new(
+                    ((value.can_id() >> (STANDARD_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    (((value.can_id() & ((1 << 3) -1 )) << 5) | ((1 << 5) -1)) as u8,
+                    ((value.can_id() >> (STANDARD_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    (((value.can_id() & ((1 << 3) -1 )) << 5) | ((1 << 5) -1)) as u8,
+                )
+            },
+            MaskType::Extended => {
+                AcceptanceCodeRegister::new(
+                    ((value.can_id() >> (EXTENDED_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    ((((value.can_id() >> (EXTENDED_FRAME_ID_LENGTH - 8 - 5)) & 0xFF) << 3) | ((1 << 3) -1)) as u8,
+                    ((value.can_id() >> (EXTENDED_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    ((((value.can_id() >> (EXTENDED_FRAME_ID_LENGTH - 8 - 5)) & 0xFF) << 3) | ((1 << 3) -1)) as u8,
+                )
+            },
+        }
     }
 
     pub fn acr0(&self) -> u8 {
@@ -75,6 +99,27 @@ impl AcceptanceMaskRegister {
         AcceptanceMaskRegister { amr0, amr1, amr2, amr3 }
     }
 
+    pub fn from_single_filter<T: CanIdFilter>(value: &T) -> Self {
+        match value.mask_type() {
+            MaskType::Standard => {
+                AcceptanceMaskRegister::new(
+                    ((!value.mask() >> (STANDARD_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    ((((!value.mask() & ((1 << 3) - 1))) << 5) | ((1 << 5) -1)) as u8,
+                    ((!value.mask() >> (STANDARD_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    ((((!value.mask() & ((1 << 3) - 1))) << 5) | ((1 << 5) -1)) as u8,
+                )
+            },
+            MaskType::Extended => {
+                AcceptanceMaskRegister::new(
+                    ((!value.mask() >> (EXTENDED_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    ((((!value.mask() >> (EXTENDED_FRAME_ID_LENGTH - 8 - 5)) & 0xFF) << 3) | ((1 << 3) -1)) as u8,
+                    ((!value.mask() >> (EXTENDED_FRAME_ID_LENGTH - 8)) & 0xFF) as u8,
+                    ((((!value.mask() >> (EXTENDED_FRAME_ID_LENGTH - 8 - 5)) & 0xFF) << 3) | ((1 << 3) -1)) as u8,
+                )
+            },
+        }
+    }
+
     pub fn amr0(&self) -> u8 {
         self.amr0
     }
@@ -125,54 +170,10 @@ impl From<&AcceptanceMaskRegister> for u32 {
     }
 }
 
-struct Filter<'a> {
-    can_ids: &'a [u32],
-    acceptance_code_register: AcceptanceCodeRegister,
-    acceptance_mask_register: AcceptanceMaskRegister
-}
-
-impl Filter<'_> {
-    pub fn new(can_ids: &'static [u32]) -> Self {
-        if can_ids.len() == 0 {
-            return Self {
-                can_ids: can_ids,
-                acceptance_code_register: 0x00_00_00_00.into(),
-                acceptance_mask_register: 0xFF_FF_FF_FF.into()
-            };
-        }
-
-
-
-        Self {
-            can_ids: can_ids,
-            acceptance_code_register: 0.into(),
-            acceptance_mask_register: 0.into()
-        }
-    }
-
-    pub fn acceptance_code_register(&self) -> u32 {
-        u32::from(&self.acceptance_code_register)
-    }
-
-    pub fn acceptance_mask_register(&self) -> u32 {
-        u32::from(&self.acceptance_mask_register)
-    }
-
-    pub fn check(&self, can_id: u32) -> bool {
-        match self.can_ids.len() {
-            0 => true,
-            1 => self.can_ids[0] == can_id,
-            n => {
-                false
-            }
-        }
-    }
-
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cantypes::filter::{StandardCanIdFilter, ExtendedCanIdFilter, CanIdFilter};
 
     #[test]
     fn transform_acceptance_code_register_001() {
@@ -194,17 +195,32 @@ mod tests {
         assert!(from_value == register.register());
     }
 
-    // #[test]
-    // fn transform_acceptance_mask_register_001() {
-    //     let array = [0x6]
-    //     let filter = Filter::new()
+    #[test]
+    fn acceptance_code_register_from_std_filter() {
+        let filter = StandardCanIdFilter::from_can_id(0x601);
+        let code_register = AcceptanceCodeRegister::from_single_filter(&filter);
+        println!("{:08X}", u32::from(&code_register));
+        assert_eq!(u32::from(code_register), 0xC0_3F_C0_3Fu32);
+    }
 
+    #[test]
+    fn acceptance_mask_register_from_std_filter() {
+        let filter = StandardCanIdFilter::from_can_id(0x601);
+        let code_register = AcceptanceMaskRegister::from_single_filter(&filter);
+        assert_eq!(u32::from(code_register), 0x00_1F_00_1Fu32);
+    }
 
-    //     let value = 0x12345678u32;
-    //     let register = AcceptanceMaskRegister::from(value);
-    //     let from_value = u32::from(&register);
-    //     assert!(value == from_value);
-    //     assert!(value == register.register());
-    //     assert!(from_value == register.register());
-    // }
+    #[test]
+    fn acceptance_code_register_from_ext_filter() {
+        let filter = ExtendedCanIdFilter::from_can_id(0x18_DA_00_00);
+        let code_register = AcceptanceCodeRegister::from_single_filter(&filter);
+        assert_eq!(u32::from(code_register), 0xC6_D7_C6_D7u32);
+    }
+
+    #[test]
+    fn acceptance_mask_register_from_ext_filter() {
+        let filter = ExtendedCanIdFilter::from_can_id(0x18_DA_00_00);
+        let code_register = AcceptanceMaskRegister::from_single_filter(&filter);
+        assert_eq!(u32::from(code_register), 0x00_07_00_07u32);
+    }
 }
