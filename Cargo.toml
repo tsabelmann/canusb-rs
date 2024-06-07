@@ -16,3 +16,4 @@ edition = "2021"
 
 [dependencies]
 serialport = {version = "4.3.0", default-features = true}
+cantypes = { git = "https://github.com/tsabelmann/cantypes-rs.git", branch = "development"}
