@@ -125,9 +125,9 @@ impl LawicelCanUsbBuilder {
 
         // close Lawicel if not closed correctly
         {
-            let mut buf: [u8; 2] = [b'C', b'\r'];
-            match serial_port.write(&mut buf) {
-                Ok(2) => {},
+            let buf: [u8; 2] = [b'C', b'\r'];
+            match serial_port.write_all(&buf) {
+                Ok(_) => {},
                 _ => return Err(LawicelCanUsbBuilderError::PreCloseError),
             };
         }
@@ -135,8 +135,8 @@ impl LawicelCanUsbBuilder {
         // check written feedback ---> close command
         {
             let mut buf = [0u8; 1];
-            match serial_port.read(&mut buf) {
-                Ok(1) => {},
+            match serial_port.read_exact(&mut buf) {
+                Ok(_) => {},
                 _ => return Err(LawicelCanUsbBuilderError::PreCloseError),
             };
         }
