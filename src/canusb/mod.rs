@@ -28,6 +28,12 @@ pub struct LawicelCanUsbBuilder {
 pub enum LawicelCanUsbBuilderError {
     SerialPortOpenError,
     LawicelConfigurationError,
+    LawicelSetTimestampFormatError,
+    LawicelSetBitrateError,
+    LawicelSetAcceptanceCodeRegisterError,
+    LawicelSetAcceptanceMaskRegisterError,
+    LawicelOpenError,
+    PreCloseError
 }
 
 pub fn new<'a>(path: impl Into<std::borrow::Cow<'a, str>>, bitrate: Bitrate) -> LawicelCanUsbBuilder {
@@ -93,40 +99,25 @@ impl LawicelCanUsbBuilder {
             .timeout(Duration::from_micros(1000))
             .open();
 
-        // unmarshalling of the serialport
+        // // unmarshalling of the serialport
         let mut serial_port = match serial_port {
-            Ok(serial_port) => {
-                serial_port
-            },
-            Err(_) => {
-                return Err(LawicelCanUsbBuilderError::SerialPortOpenError);
-            }
+            Ok(port) => port,
+            Err(_) => return Err(LawicelCanUsbBuilderError::SerialPortOpenError) 
         };
 
         // send 2-3 carriage return character
         {
             let mut buf = [b'\r', b'\r', b'\r'];
             match serial_port.write(&buf) {
-                Ok(size) => {
-                    if size != 3usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                },
-            }
+                Ok(3) => {},
+                _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError),
+            };
+
             buf = [b'\0', b'\0', b'\0'];
             match serial_port.read(&mut buf) {
-                Ok(size) => {
-                    if size != 3usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                },
-            }
+                Ok(3) => {},
+                _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError),
+            };
             if buf != [b'\r', b'\r', b'\r'] {
                 return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
             }
@@ -136,72 +127,42 @@ impl LawicelCanUsbBuilder {
         {
             let mut buf: [u8; 2] = [b'C', b'\r'];
             match serial_port.write(&mut buf) {
-                Ok(size) => {
-                    if size != 2usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                },
-            }
+                Ok(2) => {},
+                _ => return Err(LawicelCanUsbBuilderError::PreCloseError),
+            };
         }
 
         // check written feedback ---> close command
         {
             let mut buf = [0u8; 1];
             match serial_port.read(&mut buf) {
-                Ok(size) => {
-                    if size != 1usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                }
-            }
+                Ok(1) => {},
+                _ => return Err(LawicelCanUsbBuilderError::PreCloseError),
+            };
         }
 
         // configure timestamp format
         if self.use_timestamps {
             let mut buf: [u8; 3] = [b'Z', b'1', b'\r'];
             match serial_port.write(&mut buf) {
-                Ok(size) => {
-                    if size != 3usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                },
-            }
+                Ok(3) => {},
+                _ => return Err(LawicelCanUsbBuilderError::LawicelSetTimestampFormatError),
+            };
         } else {
             let mut buf: [u8; 3] = [b'Z', b'0', b'\r'];
             match serial_port.write(&mut buf) {
-                Ok(size) => {
-                    if size != 3usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                },
-            }
+                Ok(3) => {},
+                _ => return Err(LawicelCanUsbBuilderError::LawicelSetTimestampFormatError),
+            };
         }
 
         // check written feedback ---> timestamp format command
         {
             let mut buf = [0u8; 1];
             match serial_port.read(&mut buf) {
-                Ok(size) => {
-                    if size != 1usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                }
-            }
+                Ok(1) => {},
+                _ => return Err(LawicelCanUsbBuilderError::LawicelSetTimestampFormatError),
+            };
         }
 
         // configure Lawicel CanUsb bitrate
@@ -241,6 +202,25 @@ impl LawicelCanUsbBuilder {
             }
         };
 
+        // check bitrate feedback ---> bitrate command
+        {
+            let mut buf = [0u8; 1];
+            match serial_port.read(&mut buf) {
+                Ok(size) => {
+                    if size != 1usize {
+                        return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);
+                    }
+
+                    if buf[0] != b'\r' {
+                        return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);   
+                    }
+                },
+                Err(_) => {
+                    return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);
+                }
+            }
+        }
+
         // check written bitrate
         {
             match bitrate_error {
@@ -259,11 +239,11 @@ impl LawicelCanUsbBuilder {
                     };
     
                     if expected_size != size {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                        return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);
                     }
                 },
                 Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError)
+                    return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError)
                 }
             }
         }
@@ -282,19 +262,19 @@ impl LawicelCanUsbBuilder {
                 match serial_port.read(&mut buf) {
                     Ok(size) => {
                         if size != 1usize {
-                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError);
                         }
 
                         if buf[0] != b'\r' {
-                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);   
+                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError);   
                         }
                     },
                     Err(_) => {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                        return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError);
                     }
                 }
             },
-            _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError)
+            _ => return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError)
         };
 
         // configure acceptance mask register
@@ -311,74 +291,47 @@ impl LawicelCanUsbBuilder {
                 match serial_port.read(&mut buf) {
                     Ok(size) => {
                         if size != 1usize {
-                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError);
                         }
 
                         if buf[0] != b'\r' {
-                            return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);   
+                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError);   
                         }
                     },
                     Err(_) => {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                        return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError);
                     }
                 }
             },
-            _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError)
+            _ => return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError)
         };
-
-        // check bitrate feedback ---> bitrate command
-        {
-            let mut buf = [0u8; 1];
-            match serial_port.read(&mut buf) {
-                Ok(size) => {
-                    if size != 1usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-
-                    if buf[0] != b'\r' {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);   
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                }
-            }
-        }
 
         // open Lawicel 
         {
             let mut buf: [u8; 2] = [b'O', b'\r'];
             match serial_port.write(&mut buf) {
-                Ok(size) => {
-                    if size != 2usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                },
-            }
+                Ok(2) => {},
+                _ => return Err(LawicelCanUsbBuilderError::LawicelOpenError)
+            };
         }
 
         // check written feedback ---> open command
         {
             let mut buf = [0u8; 1];
             match serial_port.read(&mut buf) {
-                Ok(size) => {
-                    if (size != 1usize) && (buf[0] != b'\r') {
-                        return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
+                Ok(1) => {
+                    if buf[0] != b'\r' {
+                        return Err(LawicelCanUsbBuilderError::LawicelOpenError);
                     }
                 },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-                }
-            }
+                _ => return Err(LawicelCanUsbBuilderError::LawicelOpenError),
+            };
         }
-
-        let lawicel = LawicelCanUsb {
-            serial_port: RefCell::new(serial_port),
-        };
-        Ok(lawicel)
+        Ok(
+            LawicelCanUsb {
+                serial_port: RefCell::new(serial_port),
+            }
+        )
     }
 }
 
