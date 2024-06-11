@@ -7,6 +7,7 @@ fn main() {
     let mut ok = 0u64;
     let mut config = 0u64;
     let mut portopen = 0u64;
+    let mut debounce = 0u64;
     let mut open = 0u64;
     let mut bitrate = 0u64;
     let mut code = 0u64;
@@ -31,20 +32,23 @@ fn main() {
             Err(canusb::canusb::LawicelCanUsbBuilderError::LawicelOpenError) => {
                 open += 1;
             },
-            Err(canusb::canusb::LawicelCanUsbBuilderError::LawicelSetBitrateError) => {
+            Err(canusb::canusb::LawicelCanUsbBuilderError::SetBitrateError) => {
                 bitrate += 1;
             }
-            Err(canusb::canusb::LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError) => {
+            Err(canusb::canusb::LawicelCanUsbBuilderError::SetAcceptanceMaskRegisterError) => {
                 mask += 1;
             },
-            Err(canusb::canusb::LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError) => {
+            Err(canusb::canusb::LawicelCanUsbBuilderError::SetAcceptanceCodeRegisterError) => {
                 code += 1;
             },
-            Err(canusb::canusb::LawicelCanUsbBuilderError::LawicelSetTimestampFormatError) => {
+            Err(canusb::canusb::LawicelCanUsbBuilderError::SetTimestampFormatError) => {
                 timestamp += 1;
             },
             Err(canusb::canusb::LawicelCanUsbBuilderError::PreCloseError) => {
                 preclose += 1;
+            },
+            Err(canusb::canusb::LawicelCanUsbBuilderError::DebounceError) => {
+                debounce += 1;
             }
         }
     }
@@ -57,4 +61,5 @@ fn main() {
     println!("mask={}", mask);
     println!("timestamp={}", timestamp);
     println!("preclose={}", preclose);
+    println!("debounce={}", debounce);
 }
