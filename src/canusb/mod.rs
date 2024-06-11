@@ -1,10 +1,10 @@
 
-use serialport;
+use serialport::{self, SerialPort};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::io::{Cursor, Write};
 use std::str;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use cantypes::filter::{CanIdFilter};
 
@@ -27,13 +27,14 @@ pub struct LawicelCanUsbBuilder {
 #[derive(Debug)]
 pub enum LawicelCanUsbBuilderError {
     SerialPortOpenError,
+    PreCloseError,
+    DebounceError,
+    SetTimestampFormatError,
     LawicelConfigurationError,
-    LawicelSetTimestampFormatError,
-    LawicelSetBitrateError,
-    LawicelSetAcceptanceCodeRegisterError,
-    LawicelSetAcceptanceMaskRegisterError,
+    SetBitrateError,
+    SetAcceptanceCodeRegisterError,
+    SetAcceptanceMaskRegisterError,
     LawicelOpenError,
-    PreCloseError
 }
 
 pub fn new<'a>(path: impl Into<std::borrow::Cow<'a, str>>, bitrate: Bitrate) -> LawicelCanUsbBuilder {
@@ -90,8 +91,145 @@ impl LawicelCanUsbBuilder {
         self
     }
 
+    fn configure_preclose(&self, serial_port: &mut Box<dyn SerialPort>) -> Result<(), LawicelCanUsbBuilderError> {
+        let ts = SystemTime::now();
+        let flag = ts.elapsed().unwrap_or(Duration::from_secs(1)) < Duration::from_secs(1);
+        while flag {
+            // close Lawicel if not closed correctly
+            {
+                // serial_port.clear(serialport::ClearBuffer::All);
+                let buf: [u8; 2] = [b'C', b'\r'];
+                match serial_port.write_all(&buf) {
+                    Ok(_) => {},
+                    _ => return Err(LawicelCanUsbBuilderError::PreCloseError),
+                };
+            }
+
+            // check written feedback ---> close command
+            {
+                let mut buf = [0u8; 1];
+                match serial_port.read_exact(&mut buf) {
+                    Ok(_) => {    
+                        // terminate if the character is a carriage return or bell character
+                        if (buf[0] == b'\r') || (buf[0] == b'\x07') {
+                            println!("Preclose!");
+                            return Ok(())
+                        }
+                    },
+                    Err(_) => continue,
+                }
+            }
+        }
+        Err(LawicelCanUsbBuilderError::PreCloseError)
+    }
+
+    fn configure_debounce(&self, serial_port: &mut Box<dyn SerialPort>) -> Result<(), LawicelCanUsbBuilderError> {
+        // send 2-3 carriage return character
+        let ts = SystemTime::now();
+        let flag = ts.elapsed().unwrap_or(Duration::from_secs(1)) < Duration::from_secs(1);
+        while flag {
+            let mut buf = [b'\r', b'\r', b'\r'];
+            match serial_port.write(&buf) {
+                Ok(3) => {},
+                _ => return Err(LawicelCanUsbBuilderError::DebounceError),
+            };
+
+            buf = [b'\0', b'\0', b'\0'];
+            match serial_port.read_exact(&mut buf) {
+                Ok(_) => {
+                    // terminate if the character is a carriage return or bell character
+                    let intflag = ((buf[0] == b'\r') || (buf[0] == b'\x07'))
+                        && ((buf[1] == b'\r') || (buf[1] == b'\x07'))
+                        && ((buf[2] == b'\r') || (buf[2] == b'\x07'));
+
+                    if intflag {
+                        println!("Debounce!");
+                        return Ok(())
+                    }
+
+                },
+                _ => continue,
+            };
+        }
+        Err(LawicelCanUsbBuilderError::DebounceError)
+    }
+
+    fn configure_bitrate(&self, serial_port: &mut Box<dyn SerialPort>) -> Result<(), LawicelCanUsbBuilderError> {
+        let ts = SystemTime::now();
+        while ts.elapsed().unwrap_or(Duration::from_secs(1)) < Duration::from_secs(1) {
+            // configure Lawicel CanUsb bitrate
+            let bitrate_error = match self.bitrate {
+                Bitrate::Bitrate10K => {
+                    serial_port.write("S0\r".as_bytes())
+                },
+                Bitrate::Bitrate20K => {
+                    serial_port.write("S1\r".as_bytes())
+                },
+                Bitrate::Bitrate50K => {
+                    serial_port.write("S2\r".as_bytes())
+                },
+                Bitrate::Bitrate100K => {
+                    serial_port.write("S3\r".as_bytes())
+                },
+                Bitrate::Bitrate125K => {
+                    serial_port.write("S4\r".as_bytes())
+                },
+                Bitrate::Bitrate250K => {
+                    serial_port.write("S5\r".as_bytes())
+                },
+                Bitrate::Bitrate500K => {
+                    serial_port.write("S6\r".as_bytes())
+                },
+                Bitrate::Bitrate800K => {
+                    serial_port.write("S7\r".as_bytes())
+                },
+                Bitrate::Bitrate1M => {
+                    serial_port.write("S8\r".as_bytes())
+                },
+                Bitrate::Btr { btr0, btr1 } => {
+                    let mut buffer: [u8; 6] = [0u8; 6];
+                    let mut cursor = Cursor::new(&mut buffer[..]);
+                    write!(cursor, "s{:02X}{:02X}\r", btr0, btr1).unwrap();
+                    serial_port.write(&mut buffer)
+                }
+            };
+
+            // check written bitrate
+            match bitrate_error {
+                Ok(3) => {
+                    match self.bitrate {
+                        Bitrate::Btr { btr0: _,  btr1: _ } => continue,
+                        _ => {}
+                    }
+                },
+                Ok(6) => {
+                    match self.bitrate {
+                        Bitrate::Btr { btr0: _,  btr1: _ } => {},
+                        _ => continue
+                    }
+                }
+                _ => continue
+            };
+
+            // check bitrate feedback ---> bitrate command
+            let mut buf = [0u8; 1];
+            match serial_port.read_exact(&mut buf) {
+                Ok(_) => {
+                    if buf[0] == b'\r' {
+                        println!("Bitrate!");
+                        return Ok(())   
+                    } else {
+                        continue;
+                    }
+                },
+                Err(_) => continue,
+            }
+        }
+        Err(LawicelCanUsbBuilderError::SetBitrateError)
+    }
+
     pub fn open(self) -> Result<LawicelCanUsb, LawicelCanUsbBuilderError> {
-        let serial_port = serialport::new(self.path, self.baudrate)
+        let serial_port = serialport::new(&self.path, self.baudrate)
             .data_bits(serialport::DataBits::Eight)
             .stop_bits(serialport::StopBits::One)
             .parity(serialport::Parity::None)
@@ -105,54 +243,25 @@ impl LawicelCanUsbBuilder {
             Err(_) => return Err(LawicelCanUsbBuilderError::SerialPortOpenError) 
         };
 
-        // send 2-3 carriage return character
-        {
-            let mut buf = [b'\r', b'\r', b'\r'];
-            match serial_port.write(&buf) {
-                Ok(3) => {},
-                _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError),
-            };
+        let _ = self.configure_preclose(&mut serial_port)?;
+        let _ = self.configure_debounce(&mut serial_port)?;
+        let _ = self.configure_bitrate(&mut serial_port)?;
 
-            buf = [b'\0', b'\0', b'\0'];
-            match serial_port.read(&mut buf) {
-                Ok(3) => {},
-                _ => return Err(LawicelCanUsbBuilderError::LawicelConfigurationError),
-            };
-            if buf != [b'\r', b'\r', b'\r'] {
-                return Err(LawicelCanUsbBuilderError::LawicelConfigurationError);
-            }
-        }
 
-        // close Lawicel if not closed correctly
-        {
-            let buf: [u8; 2] = [b'C', b'\r'];
-            match serial_port.write_all(&buf) {
-                Ok(_) => {},
-                _ => return Err(LawicelCanUsbBuilderError::PreCloseError),
-            };
-        }
 
-        // check written feedback ---> close command
-        {
-            let mut buf = [0u8; 1];
-            match serial_port.read_exact(&mut buf) {
-                Ok(_) => {},
-                _ => return Err(LawicelCanUsbBuilderError::PreCloseError),
-            };
-        }
 
         // configure timestamp format
         if self.use_timestamps {
             let mut buf: [u8; 3] = [b'Z', b'1', b'\r'];
             match serial_port.write(&mut buf) {
                 Ok(3) => {},
-                _ => return Err(LawicelCanUsbBuilderError::LawicelSetTimestampFormatError),
+                _ => return Err(LawicelCanUsbBuilderError::SetTimestampFormatError),
             };
         } else {
             let mut buf: [u8; 3] = [b'Z', b'0', b'\r'];
             match serial_port.write(&mut buf) {
                 Ok(3) => {},
-                _ => return Err(LawicelCanUsbBuilderError::LawicelSetTimestampFormatError),
+                _ => return Err(LawicelCanUsbBuilderError::SetTimestampFormatError),
             };
         }
 
@@ -161,92 +270,11 @@ impl LawicelCanUsbBuilder {
             let mut buf = [0u8; 1];
             match serial_port.read(&mut buf) {
                 Ok(1) => {},
-                _ => return Err(LawicelCanUsbBuilderError::LawicelSetTimestampFormatError),
+                _ => return Err(LawicelCanUsbBuilderError::SetTimestampFormatError),
             };
         }
 
-        // configure Lawicel CanUsb bitrate
-        let bitrate_error = match self.bitrate {
-            Bitrate::Bitrate10K => {
-                serial_port.write("S0\r".as_bytes())
-            },
-            Bitrate::Bitrate20K => {
-                serial_port.write("S1\r".as_bytes())
-            },
-            Bitrate::Bitrate50K => {
-                serial_port.write("S2\r".as_bytes())
-            },
-            Bitrate::Bitrate100K => {
-                serial_port.write("S3\r".as_bytes())
-            },
-            Bitrate::Bitrate125K => {
-                serial_port.write("S4\r".as_bytes())
-            },
-            Bitrate::Bitrate250K => {
-                serial_port.write("S5\r".as_bytes())
-            },
-            Bitrate::Bitrate500K => {
-                serial_port.write("S6\r".as_bytes())
-            },
-            Bitrate::Bitrate800K => {
-                serial_port.write("S7\r".as_bytes())
-            },
-            Bitrate::Bitrate1M => {
-                serial_port.write("S8\r".as_bytes())
-            },
-            Bitrate::Btr { btr0, btr1 } => {
-                let mut buffer: [u8; 6] = [0u8; 6];
-                let mut cursor = Cursor::new(&mut buffer[..]);
-                write!(cursor, "s{:02X}{:02X}\r", btr0, btr1).unwrap();
-                serial_port.write(&mut buffer)
-            }
-        };
 
-        // check bitrate feedback ---> bitrate command
-        {
-            let mut buf = [0u8; 1];
-            match serial_port.read(&mut buf) {
-                Ok(size) => {
-                    if size != 1usize {
-                        return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);
-                    }
-
-                    if buf[0] != b'\r' {
-                        return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);   
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);
-                }
-            }
-        }
-
-        // check written bitrate
-        {
-            match bitrate_error {
-                Ok(size) => {
-                    let expected_size: usize = match self.bitrate {
-                        Bitrate::Bitrate10K => 3,
-                        Bitrate::Bitrate20K => 3,
-                        Bitrate::Bitrate50K => 3,
-                        Bitrate::Bitrate100K => 3,
-                        Bitrate::Bitrate125K => 3,
-                        Bitrate::Bitrate250K => 3,
-                        Bitrate::Bitrate500K => 3,
-                        Bitrate::Bitrate800K => 3,
-                        Bitrate::Bitrate1M => 3,
-                        Bitrate::Btr { btr0: _,  btr1: _ } => 6,
-                    };
-    
-                    if expected_size != size {
-                        return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError);
-                    }
-                },
-                Err(_) => {
-                    return Err(LawicelCanUsbBuilderError::LawicelSetBitrateError)
-                }
-            }
-        }
 
         // configure acceptance code register
         let acceptance_code_register_error = {
@@ -262,19 +290,19 @@ impl LawicelCanUsbBuilder {
                 match serial_port.read(&mut buf) {
                     Ok(size) => {
                         if size != 1usize {
-                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError);
+                            return Err(LawicelCanUsbBuilderError::SetAcceptanceCodeRegisterError);
                         }
 
                         if buf[0] != b'\r' {
-                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError);   
+                            return Err(LawicelCanUsbBuilderError::SetAcceptanceCodeRegisterError);   
                         }
                     },
                     Err(_) => {
-                        return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError);
+                        return Err(LawicelCanUsbBuilderError::SetAcceptanceCodeRegisterError);
                     }
                 }
             },
-            _ => return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceCodeRegisterError)
+            _ => return Err(LawicelCanUsbBuilderError::SetAcceptanceCodeRegisterError)
         };
 
         // configure acceptance mask register
@@ -291,19 +319,19 @@ impl LawicelCanUsbBuilder {
                 match serial_port.read(&mut buf) {
                     Ok(size) => {
                         if size != 1usize {
-                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError);
+                            return Err(LawicelCanUsbBuilderError::SetAcceptanceMaskRegisterError);
                         }
 
                         if buf[0] != b'\r' {
-                            return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError);   
+                            return Err(LawicelCanUsbBuilderError::SetAcceptanceMaskRegisterError);   
                         }
                     },
                     Err(_) => {
-                        return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError);
+                        return Err(LawicelCanUsbBuilderError::SetAcceptanceMaskRegisterError);
                     }
                 }
             },
-            _ => return Err(LawicelCanUsbBuilderError::LawicelSetAcceptanceMaskRegisterError)
+            _ => return Err(LawicelCanUsbBuilderError::SetAcceptanceMaskRegisterError)
         };
 
         // open Lawicel 
@@ -637,16 +665,30 @@ impl LawicelCanUsb {
     fn close(&self) {
         let mut serial_port = self.serial_port.borrow_mut();
 
-        // write close command
-        {
-            let mut buf: [u8; 2] = [b'C', b'\r'];
-            let _ = serial_port.write(&mut buf);
-        }
+        'outer: loop {
+             // clear everything
+            let _ = serial_port.clear(serialport::ClearBuffer::All);
 
-        // check written feedback ---> close command
-        {
-            let mut buf = [0u8; 1];
-            let _ = serial_port.read(&mut buf);
+            // write close command
+            {
+                let mut buf: [u8; 2] = [b'C', b'\r'];
+                let _ = serial_port.write(&mut buf);
+            }
+    
+            // read data
+            {
+                let mut intbuf = [b'\0'; 1];
+                match serial_port.read_exact(&mut intbuf) {
+                    Ok(_) => {
+                        // terminate if the character is a carriage return or bell character
+                        if (intbuf[0] == b'\r') || (intbuf[0] == b'\x07') {
+                            println!("Success!");
+                            break 'outer;
+                        }
+                    },
+                    Err(_) => continue,
+                }
+            }
         }
     }
 }
