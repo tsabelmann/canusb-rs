@@ -234,7 +234,7 @@ impl LawicelCanUsbBuilder {
             .stop_bits(serialport::StopBits::One)
             .parity(serialport::Parity::None)
             .flow_control(serialport::FlowControl::None)
-            .timeout(Duration::from_micros(1000))
+            .timeout(Duration::from_millis(2))
             .open();
 
         // // unmarshalling of the serialport
@@ -246,9 +246,6 @@ impl LawicelCanUsbBuilder {
         let _ = self.configure_preclose(&mut serial_port)?;
         let _ = self.configure_debounce(&mut serial_port)?;
         let _ = self.configure_bitrate(&mut serial_port)?;
-
-
-
 
         // configure timestamp format
         if self.use_timestamps {
@@ -499,13 +496,16 @@ impl LawicelCanUsb {
         println!("T6");
 
         // check written bytes to the number of computed bytes
-        match port.write(&mut buf[..len]) {
+        let position = cursor.position() as usize;
+        match port.write(&buf.get(0..position).unwrap_or(&[])) {
             Ok(size) => {
                 if len != size {
                     return Err(LawicelCanUsbSendError::DataLossError)
                 }
+                println!("I am here!");
             },
             _ => {
+                println!("I am here 2!");
                 return Err(LawicelCanUsbSendError::DataLossError)
             }
         }
